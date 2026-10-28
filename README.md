@@ -141,7 +141,7 @@ ansible all -m ping
 ansible-playbook playbooks/site.yml
 ```
 
-Для доступа к сайту добавить:
+Для доступа к сайту добавить в `/etc/hosts`:
 
 ```text
 192.168.56.10 project.local
