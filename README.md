@@ -164,6 +164,8 @@ ansible frontend -m ping
 ansible-playbook playbooks/site.yml --limit frontend
 ```
 
+Отдельный recovery playbook не нужен, потому что `frontend` не содержит уникального persistent state.
+
 ### Backend
 
 ```bash
@@ -173,7 +175,11 @@ ansible backend01 -m ping
 ansible-playbook playbooks/recover-backend.yml --limit backend01
 ```
 
-### Database
+Для `backend02` используется тот же playbook с `--limit backend02`.
+
+Recovery восстанавливает Gluster metadata, UUID, brick, membership, heal, mount `wp-content`, Apache, monitoring и logging.
+
+### db02
 
 ```bash
 vagrant destroy -f db02
@@ -181,6 +187,19 @@ vagrant up db02
 ansible db02 -m ping
 ansible-playbook playbooks/recover-database.yml --limit db02
 ```
+
+Данные replica восстанавливаются с работающего `db01`, затем автоматически настраивается GTID replication.
+
+### db01
+
+```bash
+vagrant destroy -f db01
+vagrant up db01
+ansible db01 -m ping
+ansible-playbook playbooks/recover-database.yml --limit db01
+```
+
+Данные primary восстанавливаются с surviving replica `db02`, после чего восстанавливается исходная схема replication.
 
 ### Monitoring
 
@@ -190,6 +209,9 @@ vagrant up monitoring
 ansible monitoring -m ping
 ansible-playbook playbooks/recover-monitoring.yml --limit monitoring
 ```
+
+Восстанавливаются сервисы monitoring, Gluster arbiter и историческое состояние Prometheus/Loki/Grafana.
+
 
 На практике проверено полное удаление и восстановление:
 
