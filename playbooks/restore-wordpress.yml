@@ -1,0 +1,137 @@
+---
+- name: Restore WordPress wp-content from external backup
+  hosts: backend01
+  become: true
+  gather_facts: false
+
+  vars:
+    wordpress_restore_tmp_dir: "/tmp/otus-wordpress-restore"
+
+  pre_tasks:
+    - name: Require explicit restore confirmation
+      ansible.builtin.assert:
+        that:
+          - confirm_restore | default(false) | bool
+        fail_msg: >-
+          Restore is destructive.
+          Run with -e confirm_restore=true to continue.
+
+    - name: Check external WordPress backup directory
+      ansible.builtin.stat:
+        path: "{{ external_backup_base_dir }}/wordpress"
+      register: wordpress_backup_dir
+
+    - name: Verify external WordPress backup directory exists
+      ansible.builtin.assert:
+        that:
+          - wordpress_backup_dir.stat.exists
+          - wordpress_backup_dir.stat.isdir
+        fail_msg: >-
+          External WordPress backup directory
+          {{ external_backup_base_dir }}/wordpress does not exist.
+
+    - name: Find external WordPress backups
+      ansible.builtin.find:
+        paths: "{{ external_backup_base_dir }}/wordpress"
+        patterns: "wp-content-*.tar.gz"
+        file_type: file
+      register: wordpress_backups
+
+    - name: Verify at least one WordPress backup exists
+      ansible.builtin.assert:
+        that:
+          - wordpress_backups.matched | int > 0
+        fail_msg: "No external WordPress backups were found."
+
+    - name: Select newest WordPress backup
+      ansible.builtin.set_fact:
+        wordpress_restore_file: >-
+          {{
+            (
+              wordpress_backups.files
+              | sort(attribute='mtime', reverse=true)
+              | first
+            ).path
+          }}
+
+    - name: Show selected WordPress backup
+      ansible.builtin.debug:
+        msg: "Restoring WordPress from {{ wordpress_restore_file }}"
+
+    - name: Verify GlusterFS mount
+      ansible.builtin.command:
+        argv:
+          - mountpoint
+          - -q
+          - "{{ wordpress_gluster_mount }}"
+      changed_when: false
+
+  tasks:
+    - name: Stop Apache on backend servers
+      ansible.builtin.systemd:
+        name: apache2
+        state: stopped
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['backends'] }}"
+
+    - name: Restore WordPress wp-content
+      block:
+        - name: Validate WordPress backup archive
+          ansible.builtin.command:
+            argv:
+              - tar
+              - -tzf
+              - "{{ wordpress_restore_file }}"
+          changed_when: false
+
+        - name: Remove old restore temporary directory
+          ansible.builtin.file:
+            path: "{{ wordpress_restore_tmp_dir }}"
+            state: absent
+
+        - name: Create restore temporary directory
+          ansible.builtin.file:
+            path: "{{ wordpress_restore_tmp_dir }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "0700"
+
+        - name: Extract WordPress backup
+          ansible.builtin.unarchive:
+            src: "{{ wordpress_restore_file }}"
+            dest: "{{ wordpress_restore_tmp_dir }}"
+            remote_src: true
+
+        - name: Verify extracted wp-content
+          ansible.builtin.stat:
+            path: "{{ wordpress_restore_tmp_dir }}/wp-content"
+          register: restored_wp_content
+
+        - name: Verify extracted backup structure
+          ansible.builtin.assert:
+            that:
+              - restored_wp_content.stat.exists
+              - restored_wp_content.stat.isdir
+            fail_msg: "Backup does not contain a valid wp-content directory."
+
+        - name: Synchronize restored wp-content
+          ansible.builtin.shell: |
+            rsync -a --delete \
+              "{{ wordpress_restore_tmp_dir }}/wp-content/" \
+              "{{ wordpress_gluster_mount }}/"
+          args:
+            executable: /bin/bash
+
+      always:
+        - name: Remove restore temporary directory
+          ansible.builtin.file:
+            path: "{{ wordpress_restore_tmp_dir }}"
+            state: absent
+
+        - name: Start Apache on backend servers
+          ansible.builtin.systemd:
+            name: apache2
+            state: started
+          delegate_to: "{{ item }}"
+          loop: "{{ groups['backends'] }}"

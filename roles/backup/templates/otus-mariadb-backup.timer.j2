@@ -1,0 +1,11 @@
+[Unit]
+Description=Run OTUS MariaDB backup daily
+
+[Timer]
+OnCalendar=*-*-* {{ "%02d"|format(mariadb_backup_hour) }}:{{ "%02d"|format(mariadb_backup_minute) }}:00
+Persistent=true
+RandomizedDelaySec=0
+Unit=otus-mariadb-backup.service
+
+[Install]
+WantedBy=timers.target

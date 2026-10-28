@@ -1,0 +1,14 @@
+---
+- name: Configure MariaDB servers
+  hosts: databases
+  become: true
+
+  roles:
+    - mariadb
+
+- name: Configure MariaDB replication
+  hosts: databases
+  become: true
+
+  roles:
+    - mariadb_replication

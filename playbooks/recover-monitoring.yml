@@ -1,0 +1,76 @@
+---
+- name: Restore monitoring base configuration
+  hosts: monitoring_nodes
+  become: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require single monitoring recovery target
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+        fail_msg: >-
+          Monitoring recovery must target exactly one monitoring node.
+
+  roles:
+    - common
+    - monitoring_firewall
+
+
+- name: Recover Gluster arbiter
+  hosts: monitoring_nodes
+  become: true
+  serial: 1
+
+  roles:
+    - gluster_arbiter_recovery
+
+
+- name: Restore monitoring node exporter
+  hosts: monitoring_nodes
+  become: true
+  serial: 1
+
+  roles:
+    - node_exporter
+
+
+- name: Install monitoring services
+  hosts: monitoring_nodes
+  become: true
+  serial: 1
+  force_handlers: true
+
+  roles:
+    - alertmanager
+    - blackbox_exporter
+    - prometheus
+    - loki
+    - grafana
+
+
+- name: Restore monitoring historical state
+  hosts: monitoring_nodes
+  become: true
+  serial: 1
+
+  roles:
+    - monitoring_state_restore
+
+
+- name: Restore monitoring log collection
+  hosts: monitoring_nodes
+  become: true
+  serial: 1
+
+  roles:
+    - alloy
+
+
+- name: Restore monitoring backup automation
+  hosts: monitoring_nodes
+  become: true
+  serial: 1
+
+  roles:
+    - monitoring_state_backup

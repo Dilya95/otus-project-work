@@ -1,0 +1,102 @@
+---
+system_timezone: UTC
+
+common_packages:
+  - curl
+  - wget
+  - vim
+  - git
+  - jq
+  - unzip
+  - tar
+  - rsync
+  - htop
+  - net-tools
+  - tcpdump
+  - ca-certificates
+  - gnupg
+  - lsb-release
+  - chrony
+
+project_hosts:
+  - ip: "192.168.56.10"
+    name: "frontend"
+  - ip: "192.168.56.21"
+    name: "backend01"
+  - ip: "192.168.56.22"
+    name: "backend02"
+  - ip: "192.168.56.31"
+    name: "db01"
+  - ip: "192.168.56.32"
+    name: "db02"
+  - ip: "192.168.56.40"
+    name: "monitoring"
+
+management_network: "192.168.56.0/24"
+
+frontend_app_ip: "172.16.20.10"
+
+backend01_management_ip: "192.168.56.21"
+backend02_management_ip: "192.168.56.22"
+
+backend01_app_ip: "172.16.20.21"
+backend02_app_ip: "172.16.20.22"
+
+backend01_db_ip: "172.16.30.21"
+backend02_db_ip: "172.16.30.22"
+
+db01_db_ip: "172.16.30.31"
+db02_db_ip: "172.16.30.32"
+
+monitoring_ip: "192.168.56.40"
+
+vagrant_nat_gateway: "10.0.2.2"
+
+gluster_management_port_start: 24007
+gluster_management_port_end: 24008
+gluster_brick_port_start: 49152
+gluster_brick_port_end: 60999
+
+node_exporter_version: "1.9.1"
+node_exporter_port: 9100
+
+mysqld_exporter_port: 9104
+
+alloy_version: "1.11.3"
+alloy_user: "alloy"
+alloy_group: "alloy"
+alloy_http_port: 12345
+alloy_data_dir: "/var/lib/alloy"
+
+wordpress_gluster_volume: "wp-content"
+
+wordpress_gluster_data_brick: "/srv/gluster/wp-content/brick"
+wordpress_gluster_arbiter_brick: "/srv/gluster/wp-content-arbiter/brick"
+
+wordpress_gluster_mount: "/var/www/wordpress/wp-content"
+wordpress_gluster_seed_mount: "/mnt/wp-content-gluster-seed"
+
+wordpress_gluster_backup_dir: "/var/backups/wordpress"
+
+backup_base_dir: "/var/backups/otus"
+backup_retention_days: 7
+
+mariadb_backup_hour: 2
+mariadb_backup_minute: 0
+
+wordpress_backup_hour: 2
+wordpress_backup_minute: 30
+
+external_backup_base_dir: "/vagrant/backups"
+
+gluster_metadata_backup_base_dir: "{{ external_backup_base_dir }}/gluster"
+gluster_metadata_backup_file: "glusterd-metadata.tar.gz"
+gluster_metadata_backup_hour: 3
+gluster_metadata_backup_minute: 0
+
+
+monitoring_backup_dir: "{{ external_backup_base_dir }}/monitoring"
+monitoring_backup_file: "monitoring-state.tar.gz"
+
+monitoring_backup_hour: 3
+monitoring_backup_minute: 30

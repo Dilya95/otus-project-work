@@ -1,0 +1,54 @@
+---
+- name: Create replication user on primary
+  ansible.mysql.mysql_user:
+    name: "{{ mariadb_replication_user }}"
+    password: "{{ vault_mariadb_replication_password }}"
+    host: "{{ mariadb_replica_ip }}"
+    priv: "*.*:REPLICATION SLAVE"
+    state: present
+    login_unix_socket: /run/mysqld/mysqld.sock
+  when: mariadb_role == "primary"
+  no_log: true
+
+- name: Check replication status on replica
+  ansible.builtin.command:
+    cmd: mariadb -NBe "SHOW SLAVE STATUS\G"
+  register: replication_status
+  changed_when: false
+  when: mariadb_role == "replica"
+
+- name: Configure GTID replication on replica
+  ansible.builtin.command:
+    cmd: >
+      mariadb -e "
+      CHANGE MASTER TO
+      MASTER_HOST='{{ mariadb_primary_ip }}',
+      MASTER_USER='{{ mariadb_replication_user }}',
+      MASTER_PASSWORD='{{ vault_mariadb_replication_password }}',
+      MASTER_PORT={{ mariadb_port }},
+      MASTER_USE_GTID=current_pos;
+      START SLAVE;"
+  when:
+    - mariadb_role == "replica"
+    - replication_status.stdout | trim == ""
+  no_log: true
+
+- name: Create WordPress database on primary
+  ansible.mysql.mysql_db:
+    name: "{{ wordpress_db_name }}"
+    state: present
+    encoding: utf8mb4
+    collation: utf8mb4_unicode_ci
+    login_unix_socket: /run/mysqld/mysqld.sock
+  when: mariadb_role == "primary"
+
+- name: Create WordPress database user on primary
+  ansible.mysql.mysql_user:
+    name: "{{ wordpress_db_user }}"
+    password: "{{ vault_wordpress_db_password }}"
+    host: "172.16.30.%"
+    priv: "{{ wordpress_db_name }}.*:ALL"
+    state: present
+    login_unix_socket: /run/mysqld/mysqld.sock
+  when: mariadb_role == "primary"
+  no_log: true

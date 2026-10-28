@@ -1,0 +1,10 @@
+[Unit]
+Description=OTUS MariaDB backup
+After=mariadb.service
+Requires=mariadb.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/otus-mariadb-backup.sh
+User=root
+Group=root

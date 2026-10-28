@@ -1,0 +1,15 @@
+---
+mariadb_port: 3306
+
+wordpress_db_name: wordpress
+wordpress_db_user: wordpress
+
+mariadb_primary_ip: 172.16.30.31
+mariadb_replica_ip: 172.16.30.32
+
+mariadb_replication_user: replication
+
+mysqld_exporter_version: "0.17.2"
+mysqld_exporter_user: "mysqld_exporter"
+mysqld_exporter_group: "mysqld_exporter"
+mysqld_exporter_config_dir: "/etc/mysqld_exporter"

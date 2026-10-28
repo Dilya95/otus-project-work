@@ -1,0 +1,10 @@
+---
+- name: Backup Gluster metadata
+  hosts:
+    - backends
+    - monitoring_nodes
+  become: true
+  gather_facts: false
+
+  roles:
+    - gluster_metadata_backup

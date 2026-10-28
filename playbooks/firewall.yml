@@ -1,0 +1,24 @@
+---
+- name: Configure frontend firewall
+  hosts: frontend
+  become: true
+  roles:
+    - firewall_frontend
+
+- name: Configure backend firewall
+  hosts: backends
+  become: true
+  roles:
+    - backend_firewall
+
+- name: Configure database firewall
+  hosts: databases
+  become: true
+  roles:
+    - database_firewall
+
+- name: Configure monitoring firewall
+  hosts: monitoring_nodes
+  become: true
+  roles:
+    - monitoring_firewall

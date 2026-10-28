@@ -1,0 +1,10 @@
+[Unit]
+Description=Run OTUS GlusterFS metadata backup daily
+
+[Timer]
+OnCalendar=*-*-* {{ "%02d"|format(gluster_metadata_backup_hour) }}:{{ "%02d"|format(gluster_metadata_backup_minute) }}:00
+Persistent=true
+RandomizedDelaySec=0
+
+[Install]
+WantedBy=timers.target

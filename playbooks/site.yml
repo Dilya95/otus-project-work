@@ -1,0 +1,126 @@
+---
+- name: Configure common settings on all servers
+  hosts: all
+  become: true
+
+  roles:
+    - common
+
+- name: Configure MariaDB servers
+  hosts: databases
+  become: true
+
+  roles:
+    - mariadb
+
+- name: Configure MariaDB replication
+  hosts: databases
+  become: true
+
+  roles:
+    - mariadb_replication
+
+- name: Configure WordPress backend servers
+  hosts: backends
+  become: true
+
+  roles:
+    - wordpress
+
+- name: Configure frontend firewall
+  hosts: frontend
+  become: true
+  roles:
+    - firewall_frontend
+
+- name: Configure backend firewall
+  hosts: backends
+  become: true
+  roles:
+    - backend_firewall
+
+- name: Configure database firewall
+  hosts: databases
+  become: true
+  roles:
+    - database_firewall
+
+- name: Configure monitoring firewall
+  hosts: monitoring_nodes
+  become: true
+  roles:
+    - monitoring_firewall
+
+- name: Configure shared WordPress storage
+  hosts:
+    - backends
+    - monitoring_nodes
+  become: true
+  roles:
+    - wordpress_storage
+
+- name: Configure Gluster metadata backups
+  hosts:
+    - backends
+    - monitoring_nodes
+  become: true
+
+  roles:
+    - gluster_metadata_backup
+
+- name: Configure frontend Nginx load balancer
+  hosts: frontends
+  become: true
+
+  roles:
+    - nginx_frontend
+    - firewall_frontend
+
+- name: Install Node Exporter on all servers
+  hosts: all
+  become: true
+
+  roles:
+    - node_exporter
+
+- name: Install MySQL Exporter on database servers
+  hosts: databases
+  become: true
+  roles:
+    - mysqld_exporter
+
+- name: Install Alloy on all servers
+  hosts: all
+  become: true
+  roles:
+    - alloy
+
+- name: Configure monitoring server
+  hosts: monitoring_nodes
+  become: true
+  force_handlers: true
+  roles:
+    - alertmanager
+    - blackbox_exporter
+    - prometheus
+    - loki
+    - grafana
+
+- name: Configure monitoring state backup
+  hosts: monitoring_nodes
+  become: true
+
+  roles:
+    - monitoring_state_backup
+
+- name: Configure MariaDB backups
+  hosts: db01
+  become: true
+  roles:
+    - backup
+
+- name: Configure WordPress backups
+  hosts: backend01
+  become: true
+  roles:
+    - backup

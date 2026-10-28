@@ -1,0 +1,20 @@
+[mysqld]
+
+bind-address = {{ db_ip }}
+port = {{ mariadb_port }}
+
+server-id = {{ mariadb_server_id }}
+
+log_bin = /var/log/mysql/mariadb-bin
+binlog_format = ROW
+log_slave_updates = ON
+
+relay_log = /var/log/mysql/mariadb-relay-bin
+
+expire_logs_days = 7
+
+{% if mariadb_role == 'replica' %}
+read_only = ON
+{% else %}
+read_only = OFF
+{% endif %}

@@ -1,0 +1,251 @@
+---
+- name: Install GlusterFS packages
+  ansible.builtin.apt:
+    name:
+      - glusterfs-server
+      - glusterfs-client
+      - rsync
+    state: present
+    update_cache: false
+
+- name: Enable and start glusterd
+  ansible.builtin.systemd:
+    name: glusterd
+    enabled: true
+    state: started
+
+- name: Create Gluster data brick directory
+  ansible.builtin.file:
+    path: "{{ wordpress_gluster_data_brick }}"
+    state: directory
+  when: inventory_hostname in groups['backends']
+
+- name: Create Gluster arbiter brick directory
+  ansible.builtin.file:
+    path: "{{ wordpress_gluster_arbiter_brick }}"
+    state: directory
+  when: inventory_hostname in groups['monitoring_nodes']
+
+- name: Probe backend02 Gluster peer
+  ansible.builtin.shell: |
+    if gluster peer status | grep -Fq "Hostname: {{ hostvars['backend02']['ansible_host'] }}"; then
+      echo "ALREADY_PRESENT"
+    else
+      gluster peer probe {{ hostvars['backend02']['ansible_host'] }}
+      echo "ADDED"
+    fi
+  register: gluster_probe_backend02
+  changed_when: "'ADDED' in gluster_probe_backend02.stdout"
+  run_once: true
+  delegate_to: backend01
+
+- name: Probe monitoring Gluster peer
+  ansible.builtin.shell: |
+    if gluster peer status | grep -Fq "Hostname: {{ hostvars['monitoring']['ansible_host'] }}"; then
+      echo "ALREADY_PRESENT"
+    else
+      gluster peer probe {{ hostvars['monitoring']['ansible_host'] }}
+      echo "ADDED"
+    fi
+  register: gluster_probe_monitoring
+  changed_when: "'ADDED' in gluster_probe_monitoring.stdout"
+  run_once: true
+  delegate_to: backend01
+
+- name: Check Gluster volume
+  ansible.builtin.command:
+    argv:
+      - gluster
+      - volume
+      - info
+      - "{{ wordpress_gluster_volume }}"
+  register: gluster_volume_info
+  failed_when: false
+  changed_when: false
+  run_once: true
+  delegate_to: backend01
+
+- name: Create Gluster arbiter volume
+  ansible.builtin.command:
+    argv:
+      - gluster
+      - volume
+      - create
+      - "{{ wordpress_gluster_volume }}"
+      - replica
+      - "2"
+      - arbiter
+      - "1"
+      - "{{ hostvars['backend01']['ansible_host'] }}:{{ wordpress_gluster_data_brick }}"
+      - "{{ hostvars['backend02']['ansible_host'] }}:{{ wordpress_gluster_data_brick }}"
+      - "{{ hostvars['monitoring']['ansible_host'] }}:{{ wordpress_gluster_arbiter_brick }}"
+      - force
+  when: gluster_volume_info.rc != 0
+  run_once: true
+  delegate_to: backend01
+
+- name: Check Gluster volume status
+  ansible.builtin.command:
+    argv:
+      - gluster
+      - volume
+      - info
+      - "{{ wordpress_gluster_volume }}"
+  register: gluster_volume_status
+  changed_when: false
+  run_once: true
+  delegate_to: backend01
+
+- name: Start Gluster volume
+  ansible.builtin.command:
+    argv:
+      - gluster
+      - volume
+      - start
+      - "{{ wordpress_gluster_volume }}"
+  when: "'Status: Started' not in gluster_volume_status.stdout"
+  run_once: true
+  delegate_to: backend01
+
+- name: Create WordPress backup directory
+  ansible.builtin.file:
+    path: "{{ wordpress_gluster_backup_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: inventory_hostname in groups['backends']
+
+- name: Check whether WordPress wp-content is already mounted
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ wordpress_gluster_mount }}"
+  register: wordpress_gluster_mount_status
+  failed_when: false
+  changed_when: false
+  when: inventory_hostname in groups['backends']
+
+- name: Backup local WordPress wp-content
+  ansible.builtin.command:
+    argv:
+      - cp
+      - -a
+      - "{{ wordpress_gluster_mount }}"
+      - "{{ wordpress_gluster_backup_dir }}/wp-content-pre-gluster"
+    creates: "{{ wordpress_gluster_backup_dir }}/wp-content-pre-gluster"
+  when:
+    - inventory_hostname in groups['backends']
+    - wordpress_gluster_mount_status.rc != 0
+
+- name: Stop Apache before storage migration
+  ansible.builtin.systemd:
+    name: apache2
+    state: stopped
+  when:
+    - inventory_hostname in groups['backends']
+    - wordpress_gluster_mount_status.rc != 0
+
+- name: Create temporary Gluster seed mount
+  ansible.builtin.file:
+    path: "{{ wordpress_gluster_seed_mount }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: inventory_hostname == 'backend01'
+
+- name: Check temporary Gluster seed mount
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ wordpress_gluster_seed_mount }}"
+  register: wordpress_gluster_seed_status
+  failed_when: false
+  changed_when: false
+  when: inventory_hostname == 'backend01'
+
+- name: Mount Gluster volume for initial seed
+  ansible.builtin.command:
+    argv:
+      - mount
+      - -t
+      - glusterfs
+      - "{{ hostvars['backend01']['ansible_host'] }}:/{{ wordpress_gluster_volume }}"
+      - "{{ wordpress_gluster_seed_mount }}"
+  when:
+    - inventory_hostname == 'backend01'
+    - wordpress_gluster_mount_status.rc != 0
+    - wordpress_gluster_seed_status.rc != 0
+
+- name: Seed Gluster volume from backend01
+  ansible.builtin.command:
+    argv:
+      - rsync
+      - -aHAX
+      - --numeric-ids
+      - "{{ wordpress_gluster_mount }}/"
+      - "{{ wordpress_gluster_seed_mount }}/"
+  when:
+    - inventory_hostname == 'backend01'
+    - wordpress_gluster_mount_status.rc != 0
+
+- name: Set Gluster wp-content ownership
+  ansible.builtin.file:
+    path: "{{ wordpress_gluster_seed_mount }}"
+    owner: www-data
+    group: www-data
+    mode: "0755"
+  when:
+    - inventory_hostname == 'backend01'
+    - wordpress_gluster_mount_status.rc != 0
+
+- name: Unmount temporary Gluster seed mount
+  ansible.builtin.command:
+    argv:
+      - umount
+      - "{{ wordpress_gluster_seed_mount }}"
+  when:
+    - inventory_hostname == 'backend01'
+    - wordpress_gluster_mount_status.rc != 0
+
+- name: Configure WordPress Gluster mount
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '^[^#].*\s/var/www/wordpress/wp-content\s+glusterfs\s'
+    line: "{{ ansible_host }}:/{{ wordpress_gluster_volume }} {{ wordpress_gluster_mount }} glusterfs defaults,_netdev,x-systemd.automount,x-systemd.requires=glusterd.service 0 0"
+    state: present
+  when: inventory_hostname in groups['backends']
+
+- name: Reload systemd after fstab update
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: inventory_hostname in groups['backends']
+
+- name: Mount WordPress Gluster volume
+  ansible.builtin.command:
+    argv:
+      - mount
+      - "{{ wordpress_gluster_mount }}"
+  when:
+    - inventory_hostname in groups['backends']
+    - wordpress_gluster_mount_status.rc != 0
+
+- name: Ensure mounted wp-content ownership
+  ansible.builtin.file:
+    path: "{{ wordpress_gluster_mount }}"
+    owner: www-data
+    group: www-data
+    mode: "0755"
+  when: inventory_hostname in groups['backends']
+
+- name: Start Apache after storage migration
+  ansible.builtin.systemd:
+    name: apache2
+    enabled: true
+    state: started
+  when:
+    - inventory_hostname in groups['backends']
+    - wordpress_gluster_mount_status.rc != 0

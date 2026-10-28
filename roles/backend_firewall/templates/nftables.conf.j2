@@ -1,0 +1,40 @@
+#!/usr/sbin/nft -f
+
+flush ruleset
+
+table inet filter {
+    chain input {
+        type filter hook input priority 0;
+        policy drop;
+
+        iifname "lo" accept
+
+        ct state established,related accept
+        ct state invalid drop
+
+        ip protocol icmp accept
+        ip6 nexthdr ipv6-icmp accept
+
+        ip saddr {{ management_network }} tcp dport 22 accept
+        ip saddr {{ vagrant_nat_gateway }} tcp dport 22 accept
+
+        ip saddr {{ frontend_app_ip }} tcp dport 80 accept
+
+        ip saddr {{ monitoring_ip }} tcp dport 80 accept
+        ip saddr {{ monitoring_ip }} tcp dport {{ node_exporter_port }} accept
+
+        ip saddr { {{ backend01_management_ip }}, {{ backend02_management_ip }}, {{ monitoring_ip }} } tcp dport {{ gluster_management_port_start }}-{{ gluster_management_port_end }} accept
+
+        ip saddr { {{ backend01_management_ip }}, {{ backend02_management_ip }}, {{ monitoring_ip }} } tcp dport {{ gluster_brick_port_start }}-{{ gluster_brick_port_end }} accept
+    }
+
+    chain forward {
+        type filter hook forward priority 0;
+        policy drop;
+    }
+
+    chain output {
+        type filter hook output priority 0;
+        policy accept;
+    }
+}

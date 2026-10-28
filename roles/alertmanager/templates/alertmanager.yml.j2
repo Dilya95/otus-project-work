@@ -1,0 +1,29 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: telegram
+  group_by:
+    - alertname
+    - instance
+  group_wait: 10s
+  group_interval: 30s
+  repeat_interval: 4h
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token: "{{ vault_alertmanager_telegram_bot_token }}"
+        chat_id: {{ vault_alertmanager_telegram_chat_id }}
+        send_resolved: true
+        parse_mode: HTML
+        message: |-
+          {% raw %}{{ if eq .Status "firing" }}🔥 <b>FIRING</b>{{ else }}✅ <b>RESOLVED</b>{{ end }}
+
+          {{ range .Alerts }}
+          <b>{{ .Labels.alertname }}</b>
+          {{ if .Labels.instance }}Host: <code>{{ .Labels.instance }}</code>{{ end }}
+          Severity: {{ .Labels.severity }}
+          {{ if .Annotations.summary }}{{ .Annotations.summary }}{{ end }}
+          {{ if .Annotations.description }}{{ .Annotations.description }}{{ end }}
+          {{ end }}{% endraw %}

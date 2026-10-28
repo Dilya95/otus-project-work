@@ -1,0 +1,29 @@
+---
+- name: Install Node Exporter on all servers
+  hosts: all
+  become: true
+  roles:
+    - node_exporter
+
+- name: Install MySQL Exporter on database servers
+  hosts: databases
+  become: true
+  roles:
+    - mysqld_exporter
+
+- name: Install Alloy on all servers
+  hosts: all
+  become: true
+  roles:
+    - alloy
+
+- name: Configure monitoring server
+  hosts: monitoring_nodes
+  become: true
+  force_handlers: true
+  roles:
+    - alertmanager
+    - blackbox_exporter
+    - prometheus
+    - loki
+    - grafana

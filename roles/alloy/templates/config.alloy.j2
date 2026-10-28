@@ -1,0 +1,94 @@
+loki.relabel "journal" {
+  forward_to = []
+
+  rule {
+    source_labels = ["__journal__systemd_unit"]
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__journal_priority_keyword"]
+    target_label  = "level"
+  }
+}
+
+loki.source.journal "systemd" {
+  max_age = "24h"
+
+  relabel_rules = loki.relabel.journal.rules
+
+  labels = {
+    host = "{{ inventory_hostname }}",
+    job  = "systemd-journal",
+    role = "{% if inventory_hostname == 'frontend' %}frontend{% elif inventory_hostname in groups['backends'] %}backend{% elif inventory_hostname in groups['databases'] %}database{% elif inventory_hostname in groups['monitoring_nodes'] %}monitoring{% else %}unknown{% endif %}",
+  }
+
+  forward_to = [
+    loki.write.default.receiver,
+  ]
+}
+
+{% if inventory_hostname == 'frontend' %}
+local.file_match "nginx" {
+  path_targets = [
+    {
+      "__path__" = "/var/log/nginx/project-access.log",
+      "host"     = "{{ inventory_hostname }}",
+      "role"     = "frontend",
+      "service"  = "nginx",
+      "log_type" = "access",
+    },
+    {
+      "__path__" = "/var/log/nginx/project-error.log",
+      "host"     = "{{ inventory_hostname }}",
+      "role"     = "frontend",
+      "service"  = "nginx",
+      "log_type" = "error",
+    },
+  ]
+}
+
+loki.source.file "nginx" {
+  targets    = local.file_match.nginx.targets
+  forward_to = [loki.write.default.receiver]
+}
+{% endif %}
+
+{% if inventory_hostname in groups['backends'] %}
+local.file_match "apache" {
+  path_targets = [
+    {
+      "__path__" = "/var/log/apache2/wordpress-access.log",
+      "host"     = "{{ inventory_hostname }}",
+      "role"     = "backend",
+      "service"  = "apache2",
+      "log_type" = "access",
+    },
+    {
+      "__path__" = "/var/log/apache2/wordpress-error.log",
+      "host"     = "{{ inventory_hostname }}",
+      "role"     = "backend",
+      "service"  = "apache2",
+      "log_type" = "error",
+    },
+    {
+      "__path__" = "/var/log/apache2/error.log",
+      "host"     = "{{ inventory_hostname }}",
+      "role"     = "backend",
+      "service"  = "apache2",
+      "log_type" = "error",
+    },
+  ]
+}
+
+loki.source.file "apache" {
+  targets    = local.file_match.apache.targets
+  forward_to = [loki.write.default.receiver]
+}
+{% endif %}
+
+loki.write "default" {
+  endpoint {
+    url = "http://192.168.56.40:3100/loki/api/v1/push"
+  }
+}

@@ -1,0 +1,12 @@
+---
+- name: Configure MariaDB backups
+  hosts: db01
+  become: true
+  roles:
+    - backup
+
+- name: Configure WordPress backups
+  hosts: backend01
+  become: true
+  roles:
+    - backup

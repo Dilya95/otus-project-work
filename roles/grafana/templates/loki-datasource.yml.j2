@@ -1,0 +1,10 @@
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://127.0.0.1:{{ loki_port }}
+    uid: loki
+    isDefault: false
+    editable: false

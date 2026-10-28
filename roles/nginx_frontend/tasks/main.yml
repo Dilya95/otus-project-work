@@ -1,0 +1,69 @@
+---
+- name: Install Nginx and OpenSSL
+  ansible.builtin.apt:
+    name:
+      - nginx
+      - openssl
+    state: present
+    update_cache: true
+
+- name: Create SSL directory
+  ansible.builtin.file:
+    path: /etc/nginx/ssl
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Generate private key
+  ansible.builtin.command:
+    cmd: openssl genrsa -out /etc/nginx/ssl/project.local.key 2048
+    creates: /etc/nginx/ssl/project.local.key
+
+- name: Generate self-signed certificate
+  ansible.builtin.command:
+    cmd: >
+      openssl req
+      -x509
+      -new
+      -nodes
+      -key /etc/nginx/ssl/project.local.key
+      -sha256
+      -days 3650
+      -out /etc/nginx/ssl/project.local.crt
+      -subj "/CN=project.local"
+      -addext "subjectAltName=DNS:project.local"
+    creates: /etc/nginx/ssl/project.local.crt
+
+- name: Deploy Nginx frontend configuration
+  ansible.builtin.template:
+    src: project.conf.j2
+    dest: /etc/nginx/sites-available/project.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload Nginx
+
+- name: Disable default Nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload Nginx
+
+- name: Enable project Nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/project.conf
+    dest: /etc/nginx/sites-enabled/project.conf
+    state: link
+  notify: Reload Nginx
+
+- name: Validate Nginx configuration
+  ansible.builtin.command:
+    cmd: nginx -t
+  changed_when: false
+
+- name: Ensure Nginx is enabled and running
+  ansible.builtin.systemd:
+    name: nginx
+    enabled: true
+    state: started

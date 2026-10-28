@@ -1,0 +1,137 @@
+---
+- name: Install required packages
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - software-properties-common
+      - wget
+      - gpg
+      - python3-debian
+    state: present
+
+- name: Create Grafana keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Check Grafana repository key
+  ansible.builtin.stat:
+    path: /etc/apt/keyrings/grafana.asc
+  register: grafana_repo_key
+
+- name: Download Grafana repository key
+  ansible.builtin.get_url:
+    url: https://apt.grafana.com/gpg-full.key
+    dest: /etc/apt/keyrings/grafana.asc
+    mode: "0644"
+  when: not grafana_repo_key.stat.exists
+
+- name: Configure Grafana repository
+  ansible.builtin.deb822_repository:
+    name: grafana
+    types:
+      - deb
+    uris:
+      - https://apt.grafana.com
+    suites:
+      - stable
+    components:
+      - main
+    signed_by: /etc/apt/keyrings/grafana.asc
+    state: present
+
+- name: Check Grafana installation
+  ansible.builtin.command:
+    cmd: dpkg-query -W -f='${Status}' grafana
+  register: grafana_installed
+  changed_when: false
+  failed_when: false
+
+- name: Update APT cache for Grafana
+  ansible.builtin.apt:
+    update_cache: true
+  when: grafana_installed.rc != 0
+
+- name: Install Grafana
+  ansible.builtin.apt:
+    name: grafana
+    state: present
+  when: grafana_installed.rc != 0
+
+- name: Configure Grafana
+  ansible.builtin.template:
+    src: grafana.ini.j2
+    dest: /etc/grafana/grafana.ini
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: Restart Grafana
+
+- name: Create datasource provisioning directory
+  ansible.builtin.file:
+    path: /etc/grafana/provisioning/datasources
+    state: directory
+    owner: root
+    group: grafana
+    mode: "0755"
+
+- name: Configure Loki datasource
+  ansible.builtin.template:
+    src: loki-datasource.yml.j2
+    dest: /etc/grafana/provisioning/datasources/loki.yml
+    owner: root
+    group: grafana
+    mode: "0644"
+  notify: Restart Grafana
+
+- name: Configure Prometheus datasource
+  ansible.builtin.template:
+    src: prometheus-datasource.yml.j2
+    dest: /etc/grafana/provisioning/datasources/prometheus.yml
+    owner: root
+    group: grafana
+    mode: "0640"
+  notify: Restart Grafana
+
+- name: Create dashboard provisioning directory
+  ansible.builtin.file:
+    path: /etc/grafana/provisioning/dashboards
+    state: directory
+    owner: root
+    group: grafana
+    mode: "0755"
+
+- name: Create Grafana dashboards directory
+  ansible.builtin.file:
+    path: /var/lib/grafana/dashboards
+    state: directory
+    owner: grafana
+    group: grafana
+    mode: "0755"
+
+- name: Configure dashboard provisioning
+  ansible.builtin.template:
+    src: dashboards.yml.j2
+    dest: /etc/grafana/provisioning/dashboards/dashboards.yml
+    owner: root
+    group: grafana
+    mode: "0644"
+  notify: Restart Grafana
+
+- name: Deploy infrastructure dashboard
+  ansible.builtin.template:
+    src: infrastructure-dashboard.json.j2
+    dest: /var/lib/grafana/dashboards/infrastructure.json
+    owner: grafana
+    group: grafana
+    mode: "0644"
+  notify: Restart Grafana
+
+- name: Enable and start Grafana
+  ansible.builtin.systemd:
+    name: grafana-server
+    enabled: true
+    state: started

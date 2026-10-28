@@ -1,0 +1,44 @@
+#!/bin/bash
+set -euo pipefail
+
+SOURCE="{{ wordpress_gluster_mount }}"
+BACKUP_DIR="{{ backup_base_dir }}/wordpress"
+EXTERNAL_BACKUP_DIR="{{ external_backup_base_dir }}/wordpress"
+TIMESTAMP="$(date -u +%Y-%m-%d_%H%M%S)"
+
+TMP_FILE="${BACKUP_DIR}/.wp-content-${TIMESTAMP}.tar.gz.tmp"
+FINAL_FILE="${BACKUP_DIR}/wp-content-${TIMESTAMP}.tar.gz"
+EXTERNAL_FILE="${EXTERNAL_BACKUP_DIR}/wp-content-${TIMESTAMP}.tar.gz"
+
+mkdir -p "${BACKUP_DIR}"
+mkdir -p "${EXTERNAL_BACKUP_DIR}"
+
+mountpoint -q "${SOURCE}"
+
+tar \
+  --one-file-system \
+  -C "$(dirname "${SOURCE}")" \
+  -czf "${TMP_FILE}" \
+  "$(basename "${SOURCE}")"
+
+test -s "${TMP_FILE}"
+
+tar -tzf "${TMP_FILE}" >/dev/null
+
+mv "${TMP_FILE}" "${FINAL_FILE}"
+
+cp "${FINAL_FILE}" "${EXTERNAL_FILE}"
+
+tar -tzf "${EXTERNAL_FILE}" >/dev/null
+
+find "${BACKUP_DIR}" \
+  -type f \
+  -name "wp-content-*.tar.gz" \
+  -mtime +{{ backup_retention_days }} \
+  -delete
+
+find "${EXTERNAL_BACKUP_DIR}" \
+  -type f \
+  -name "wp-content-*.tar.gz" \
+  -mtime +{{ backup_retention_days }} \
+  -delete

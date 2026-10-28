@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+BACKUP_DIR="{{ gluster_metadata_backup_base_dir }}/{{ inventory_hostname }}"
+BACKUP_FILE="${BACKUP_DIR}/{{ gluster_metadata_backup_file }}"
+TEMP_FILE="${BACKUP_FILE}.tmp"
+
+mkdir -p "${BACKUP_DIR}"
+
+test -f /var/lib/glusterd/glusterd.info
+
+rm -f "${TEMP_FILE}"
+
+tar \
+  -C / \
+  -czf "${TEMP_FILE}" \
+  var/lib/glusterd
+
+tar -tzf "${TEMP_FILE}" >/dev/null
+
+mv -f "${TEMP_FILE}" "${BACKUP_FILE}"

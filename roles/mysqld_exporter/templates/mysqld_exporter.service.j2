@@ -1,0 +1,19 @@
+[Unit]
+Description=Prometheus MySQL Exporter
+Wants=network-online.target
+After=network-online.target mariadb.service
+
+[Service]
+User={{ mysqld_exporter_user }}
+Group={{ mysqld_exporter_group }}
+Type=simple
+
+ExecStart=/usr/local/bin/mysqld_exporter \
+    --config.my-cnf={{ mysqld_exporter_config_dir }}/my.cnf \
+    --web.listen-address=:{{ mysqld_exporter_port }}
+
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

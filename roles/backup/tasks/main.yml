@@ -1,0 +1,98 @@
+---
+- name: Create backup base directory
+  ansible.builtin.file:
+    path: "{{ backup_base_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Create MariaDB backup directory
+  ansible.builtin.file:
+    path: "{{ backup_base_dir }}/mariadb"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: inventory_hostname == "db01"
+
+- name: Create WordPress backup directory
+  ansible.builtin.file:
+    path: "{{ backup_base_dir }}/wordpress"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when: inventory_hostname == "backend01"
+
+- name: Deploy MariaDB backup script
+  ansible.builtin.template:
+    src: mariadb-backup.sh.j2
+    dest: /usr/local/sbin/otus-mariadb-backup.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: inventory_hostname == "db01"
+
+- name: Deploy WordPress backup script
+  ansible.builtin.template:
+    src: wordpress-backup.sh.j2
+    dest: /usr/local/sbin/otus-wordpress-backup.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: inventory_hostname == "backend01"
+
+- name: Deploy MariaDB backup service
+  ansible.builtin.template:
+    src: otus-mariadb-backup.service.j2
+    dest: /etc/systemd/system/otus-mariadb-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: inventory_hostname == "db01"
+
+- name: Deploy MariaDB backup timer
+  ansible.builtin.template:
+    src: otus-mariadb-backup.timer.j2
+    dest: /etc/systemd/system/otus-mariadb-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  when: inventory_hostname == "db01"
+
+- name: Deploy WordPress backup service
+  ansible.builtin.template:
+    src: otus-wordpress-backup.service.j2
+    dest: /etc/systemd/system/otus-wordpress-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: inventory_hostname == "backend01"
+
+- name: Deploy WordPress backup timer
+  ansible.builtin.template:
+    src: otus-wordpress-backup.timer.j2
+    dest: /etc/systemd/system/otus-wordpress-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  when: inventory_hostname == "backend01"
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Enable MariaDB backup timer
+  ansible.builtin.systemd:
+    name: otus-mariadb-backup.timer
+    enabled: true
+    state: started
+  when: inventory_hostname == "db01"
+
+- name: Enable WordPress backup timer
+  ansible.builtin.systemd:
+    name: otus-wordpress-backup.timer
+    enabled: true
+    state: started
+  when: inventory_hostname == "backend01"

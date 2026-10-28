@@ -1,0 +1,105 @@
+---
+- name: Restore MariaDB from external backup
+  hosts: db01
+  become: true
+  gather_facts: false
+
+  pre_tasks:
+    - name: Require explicit restore confirmation
+      ansible.builtin.assert:
+        that:
+          - confirm_restore | default(false) | bool
+        fail_msg: >-
+          Restore is destructive.
+          Run with -e confirm_restore=true to continue.
+
+    - name: Check external MariaDB backup directory
+      ansible.builtin.stat:
+        path: "{{ external_backup_base_dir }}/mariadb"
+      register: mariadb_backup_dir
+
+    - name: Verify external MariaDB backup directory exists
+      ansible.builtin.assert:
+        that:
+          - mariadb_backup_dir.stat.exists
+          - mariadb_backup_dir.stat.isdir
+        fail_msg: >-
+          External MariaDB backup directory
+          {{ external_backup_base_dir }}/mariadb does not exist.
+
+    - name: Find external MariaDB backups
+      ansible.builtin.find:
+        paths: "{{ external_backup_base_dir }}/mariadb"
+        patterns: "wordpress-*.sql.gz"
+        file_type: file
+      register: mariadb_backups
+
+    - name: Verify at least one MariaDB backup exists
+      ansible.builtin.assert:
+        that:
+          - mariadb_backups.matched | int > 0
+        fail_msg: "No external MariaDB backups were found."
+
+    - name: Select newest MariaDB backup
+      ansible.builtin.set_fact:
+        mariadb_restore_file: >-
+          {{
+            (
+              mariadb_backups.files
+              | sort(attribute='mtime', reverse=true)
+              | first
+            ).path
+          }}
+
+    - name: Show selected MariaDB backup
+      ansible.builtin.debug:
+        msg: "Restoring MariaDB from {{ mariadb_restore_file }}"
+
+  tasks:
+    - name: Stop Apache on backend servers
+      ansible.builtin.systemd:
+        name: apache2
+        state: stopped
+      delegate_to: "{{ item }}"
+      loop: "{{ groups['backends'] }}"
+
+    - name: Restore MariaDB
+      block:
+        - name: Validate MariaDB backup archive
+          ansible.builtin.command:
+            argv:
+              - gzip
+              - -t
+              - "{{ mariadb_restore_file }}"
+          changed_when: false
+
+        - name: Restore MariaDB database
+          ansible.builtin.shell: |
+            set -o pipefail
+            gzip -dc "{{ mariadb_restore_file }}" | mariadb
+          args:
+            executable: /bin/bash
+
+        - name: Verify WordPress database exists
+          ansible.builtin.shell: |
+            mariadb -NBe "
+            SELECT COUNT(*)
+            FROM information_schema.schemata
+            WHERE schema_name='{{ wordpress_db_name }}';
+            "
+          register: wordpress_database_check
+          changed_when: false
+
+        - name: Verify database restore result
+          ansible.builtin.assert:
+            that:
+              - wordpress_database_check.stdout | trim == "1"
+            fail_msg: "WordPress database was not restored successfully."
+
+      always:
+        - name: Start Apache on backend servers
+          ansible.builtin.systemd:
+            name: apache2
+            state: started
+          delegate_to: "{{ item }}"
+          loop: "{{ groups['backends'] }}"

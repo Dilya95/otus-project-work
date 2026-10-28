@@ -1,0 +1,91 @@
+---
+- name: Create MySQL Exporter group
+  ansible.builtin.group:
+    name: "{{ mysqld_exporter_group }}"
+    system: true
+
+- name: Create MySQL Exporter user
+  ansible.builtin.user:
+    name: "{{ mysqld_exporter_user }}"
+    group: "{{ mysqld_exporter_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Create MySQL Exporter configuration directory
+  ansible.builtin.file:
+    path: "{{ mysqld_exporter_config_dir }}"
+    state: directory
+    owner: "{{ mysqld_exporter_user }}"
+    group: "{{ mysqld_exporter_group }}"
+    mode: "0750"
+
+- name: Create MariaDB monitoring user
+  community.mysql.mysql_user:
+    name: mysqld_exporter
+    host: localhost
+    password: "{{ vault_mysqld_exporter_password }}"
+    priv:
+      "*.*": "SELECT,PROCESS,BINLOG MONITOR,SLAVE MONITOR"
+    state: present
+    login_unix_socket: /run/mysqld/mysqld.sock
+    sql_log_bin: false
+  no_log: true
+
+- name: Deploy MySQL Exporter client configuration
+  ansible.builtin.template:
+    src: my.cnf.j2
+    dest: "{{ mysqld_exporter_config_dir }}/my.cnf"
+    owner: "{{ mysqld_exporter_user }}"
+    group: "{{ mysqld_exporter_group }}"
+    mode: "0600"
+  notify: Restart MySQL Exporter
+
+- name: Check MySQL Exporter binary
+  ansible.builtin.stat:
+    path: /usr/local/bin/mysqld_exporter
+  register: mysqld_exporter_binary
+
+- name: Download MySQL Exporter
+  ansible.builtin.get_url:
+    url: "https://github.com/prometheus/mysqld_exporter/releases/download/v{{ mysqld_exporter_version }}/mysqld_exporter-{{ mysqld_exporter_version }}.linux-arm64.tar.gz"
+    dest: "/tmp/mysqld_exporter-{{ mysqld_exporter_version }}.linux-arm64.tar.gz"
+    mode: "0644"
+  when: not mysqld_exporter_binary.stat.exists
+
+- name: Extract MySQL Exporter
+  ansible.builtin.unarchive:
+    src: "/tmp/mysqld_exporter-{{ mysqld_exporter_version }}.linux-arm64.tar.gz"
+    dest: /tmp
+    remote_src: true
+    creates: "/tmp/mysqld_exporter-{{ mysqld_exporter_version }}.linux-arm64/mysqld_exporter"
+  when: not mysqld_exporter_binary.stat.exists
+
+- name: Install MySQL Exporter binary
+  ansible.builtin.copy:
+    src: "/tmp/mysqld_exporter-{{ mysqld_exporter_version }}.linux-arm64/mysqld_exporter"
+    dest: /usr/local/bin/mysqld_exporter
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when: not mysqld_exporter_binary.stat.exists
+  notify: Restart MySQL Exporter
+
+- name: Deploy MySQL Exporter systemd service
+  ansible.builtin.template:
+    src: mysqld_exporter.service.j2
+    dest: /etc/systemd/system/mysqld_exporter.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart MySQL Exporter
+
+- name: Enable and start MySQL Exporter
+  ansible.builtin.systemd:
+    name: mysqld_exporter
+    enabled: true
+    state: started
+    daemon_reload: true

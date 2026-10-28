@@ -1,0 +1,8 @@
+[Unit]
+Description=OTUS GlusterFS metadata backup
+After=glusterd.service
+Requires=glusterd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/otus-gluster-metadata-backup.sh

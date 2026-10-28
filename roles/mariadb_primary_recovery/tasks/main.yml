@@ -1,0 +1,267 @@
+---
+- name: Require primary recovery target
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'db01'
+      - mariadb_role == 'primary'
+    fail_msg: >-
+      This recovery procedure is intended only for db01 primary.
+
+- name: Check whether WordPress database already exists on primary
+  ansible.builtin.shell: |
+    mariadb -NBe "
+      SELECT SCHEMA_NAME
+      FROM INFORMATION_SCHEMA.SCHEMATA
+      WHERE SCHEMA_NAME='{{ wordpress_db_name }}';
+    "
+  args:
+    executable: /bin/bash
+  register: mariadb_primary_existing_database
+  changed_when: false
+
+- name: Require fresh primary database server
+  ansible.builtin.assert:
+    that:
+      - mariadb_primary_existing_database.stdout | trim == ""
+    fail_msg: >-
+      WordPress database already exists on db01.
+      Primary recovery is intended for a freshly rebuilt db01.
+
+- name: Stop Apache during primary recovery
+  ansible.builtin.systemd:
+    name: apache2
+    state: stopped
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['backends'] }}"
+
+- name: Wait until replica SQL thread has processed all relay log
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    mariadb -e 'SHOW SLAVE STATUS\G' |
+      grep -Fq 'Slave_SQL_Running_State: Slave has read all relay log; waiting for more updates'
+  args:
+    executable: /bin/bash
+  delegate_to: db02
+  register: mariadb_replica_drain
+  changed_when: false
+  retries: 20
+  delay: 3
+  until: mariadb_replica_drain.rc == 0
+
+- name: Stop replication on surviving replica
+  ansible.builtin.command:
+    cmd: mariadb -e "STOP SLAVE;"
+  delegate_to: db02
+  changed_when: true
+
+- name: Read GTID binlog state from surviving replica
+  ansible.builtin.command:
+    cmd: mariadb -NBe "SELECT @@GLOBAL.gtid_binlog_state;"
+  delegate_to: db02
+  register: mariadb_surviving_gtid_state
+  changed_when: false
+
+- name: Require valid GTID binlog state
+  ansible.builtin.assert:
+    that:
+      - mariadb_surviving_gtid_state.stdout | trim | length > 0
+    fail_msg: >-
+      Surviving replica does not contain a valid GTID binlog state.
+
+- name: Create temporary recovery directory on replica
+  ansible.builtin.file:
+    path: /var/tmp/otus-mariadb-primary-recovery
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  delegate_to: db02
+
+- name: Create consistent WordPress recovery dump from replica
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    mariadb-dump \
+      --single-transaction \
+      --quick \
+      --routines \
+      --triggers \
+      --events \
+      --hex-blob \
+      --databases "{{ wordpress_db_name }}" \
+      > /var/tmp/otus-mariadb-primary-recovery/wordpress.sql
+  args:
+    executable: /bin/bash
+  delegate_to: db02
+  changed_when: true
+
+- name: Fetch primary recovery dump
+  ansible.builtin.fetch:
+    src: /var/tmp/otus-mariadb-primary-recovery/wordpress.sql
+    dest: /tmp/otus-mariadb-primary-recovery.sql
+    flat: true
+  delegate_to: db02
+
+- name: Copy recovery dump to new primary
+  ansible.builtin.copy:
+    src: /tmp/otus-mariadb-primary-recovery.sql
+    dest: /var/tmp/otus-mariadb-primary-recovery.sql
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Restore databases without generating new GTIDs
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    {
+      echo "SET SESSION sql_log_bin=0;"
+      cat /var/tmp/otus-mariadb-primary-recovery.sql
+    } | mariadb
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Restore primary GTID history
+  ansible.builtin.command:
+    cmd: >-
+      mariadb -e "
+      RESET MASTER;
+      SET GLOBAL gtid_slave_pos='';
+      SET GLOBAL gtid_binlog_state='{{ mariadb_surviving_gtid_state.stdout | trim }}';
+      "
+  changed_when: true
+
+- name: Verify restored primary GTID state
+  ansible.builtin.command:
+    cmd: >-
+      mariadb -NBe
+      "SELECT @@GLOBAL.gtid_slave_pos,
+              @@GLOBAL.gtid_binlog_pos,
+              @@GLOBAL.gtid_current_pos;"
+  register: mariadb_primary_gtid_check
+  changed_when: false
+
+- name: Show restored primary GTID state
+  ansible.builtin.debug:
+    var: mariadb_primary_gtid_check.stdout_lines
+
+- name: Recreate replication user on rebuilt primary
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    mariadb <<SQL
+    SET SESSION sql_log_bin=0;
+
+    CREATE USER IF NOT EXISTS '{{ mariadb_replication_user }}'@'{{ mariadb_replica_ip }}'
+      IDENTIFIED BY '{{ vault_mariadb_replication_password }}';
+
+    GRANT REPLICATION SLAVE
+      ON *.*
+      TO '{{ mariadb_replication_user }}'@'{{ mariadb_replica_ip }}';
+
+    FLUSH PRIVILEGES;
+    SQL
+  args:
+    executable: /bin/bash
+  no_log: true
+  changed_when: true
+
+- name: Recreate WordPress database user on rebuilt primary
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    mariadb <<SQL
+    SET SESSION sql_log_bin=0;
+
+    CREATE USER IF NOT EXISTS '{{ wordpress_db_user }}'@'172.16.30.%'
+      IDENTIFIED BY '{{ vault_wordpress_db_password }}';
+
+    GRANT ALL PRIVILEGES
+      ON {{ wordpress_db_name }}.*
+      TO '{{ wordpress_db_user }}'@'172.16.30.%';
+
+    FLUSH PRIVILEGES;
+    SQL
+  args:
+    executable: /bin/bash
+  no_log: true
+  changed_when: true
+
+- name: Reset old replication configuration on replica
+  ansible.builtin.command:
+    cmd: mariadb -e "RESET SLAVE ALL;"
+  delegate_to: db02
+  changed_when: true
+
+- name: Configure replica to use rebuilt primary
+  ansible.builtin.command:
+    cmd: >
+      mariadb -e "
+      CHANGE MASTER TO
+      MASTER_HOST='{{ mariadb_primary_ip }}',
+      MASTER_USER='{{ mariadb_replication_user }}',
+      MASTER_PASSWORD='{{ vault_mariadb_replication_password }}',
+      MASTER_PORT={{ mariadb_port }},
+      MASTER_USE_GTID=slave_pos;
+      START SLAVE;"
+  delegate_to: db02
+  no_log: true
+  changed_when: true
+
+- name: Wait for replication after primary recovery
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    status="$(mariadb -e 'SHOW SLAVE STATUS\G')"
+
+    echo "$status" | grep -q 'Slave_IO_Running: Yes'
+    echo "$status" | grep -q 'Slave_SQL_Running: Yes'
+  args:
+    executable: /bin/bash
+  delegate_to: db02
+  register: mariadb_primary_recovery_replication
+  changed_when: false
+  retries: 20
+  delay: 3
+  until: mariadb_primary_recovery_replication.rc == 0
+
+- name: Verify replica is caught up after primary recovery
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    lag="$(
+      mariadb -e 'SHOW SLAVE STATUS\G' |
+      sed -n 's/^[[:space:]]*Seconds_Behind_Master:[[:space:]]*//p' |
+      head -n 1
+    )"
+
+    test "$lag" = "0"
+  args:
+    executable: /bin/bash
+  delegate_to: db02
+  register: mariadb_primary_recovery_lag
+  changed_when: false
+  retries: 20
+  delay: 3
+  until: mariadb_primary_recovery_lag.rc == 0
+
+- name: Start Apache after primary recovery
+  ansible.builtin.systemd:
+    name: apache2
+    enabled: true
+    state: started
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['backends'] }}"
+
+- name: Remove recovery dump from primary
+  ansible.builtin.file:
+    path: /var/tmp/otus-mariadb-primary-recovery.sql
+    state: absent
+
+- name: Remove recovery dump from replica
+  ansible.builtin.file:
+    path: /var/tmp/otus-mariadb-primary-recovery/wordpress.sql
+    state: absent
+  delegate_to: db02

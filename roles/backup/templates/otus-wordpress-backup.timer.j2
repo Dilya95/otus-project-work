@@ -1,0 +1,11 @@
+[Unit]
+Description=Run OTUS WordPress backup daily
+
+[Timer]
+OnCalendar=*-*-* {{ "%02d"|format(wordpress_backup_hour) }}:{{ "%02d"|format(wordpress_backup_minute) }}:00
+Persistent=true
+RandomizedDelaySec=0
+Unit=otus-wordpress-backup.service
+
+[Install]
+WantedBy=timers.target

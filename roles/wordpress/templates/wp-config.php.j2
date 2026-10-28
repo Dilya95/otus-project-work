@@ -1,0 +1,32 @@
+<?php
+
+define('DB_NAME', '{{ wordpress_db_name }}');
+define('DB_USER', '{{ wordpress_db_user }}');
+define('DB_PASSWORD', '{{ vault_wordpress_db_password }}');
+define('DB_HOST', '{{ wordpress_db_host }}:{{ wordpress_db_port }}');
+define('DB_CHARSET', 'utf8mb4');
+define('DB_COLLATE', '');
+
+define('AUTH_KEY',         'otus-auth-key-2026');
+define('SECURE_AUTH_KEY',  'otus-secure-auth-key-2026');
+define('LOGGED_IN_KEY',    'otus-logged-in-key-2026');
+define('NONCE_KEY',        'otus-nonce-key-2026');
+define('AUTH_SALT',        'otus-auth-salt-2026');
+define('SECURE_AUTH_SALT', 'otus-secure-auth-salt-2026');
+define('LOGGED_IN_SALT',   'otus-logged-in-salt-2026');
+define('NONCE_SALT',       'otus-nonce-salt-2026');
+
+$table_prefix = 'wp_';
+
+define('WP_DEBUG', false);
+
+if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) &&
+    $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+    $_SERVER['HTTPS'] = 'on';
+}
+
+if (!defined('ABSPATH')) {
+    define('ABSPATH', __DIR__ . '/');
+}
+
+require_once ABSPATH . 'wp-settings.php';

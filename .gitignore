@@ -1,0 +1,5 @@
+backups/
+.vagrant/
+.DS_Store
+inventory/production/group_vars/all/vault.yml
+inventory/production/group_vars/databases/vault.yml

@@ -1,0 +1,96 @@
+---
+- name: Require monitoring node
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname in groups['monitoring_nodes']
+    fail_msg: "Monitoring state restore can only run on a monitoring node."
+
+- name: Check monitoring state backup
+  ansible.builtin.stat:
+    path: "{{ monitoring_backup_dir }}/{{ monitoring_backup_file }}"
+  register: monitoring_state_backup
+
+- name: Require monitoring state backup
+  ansible.builtin.assert:
+    that:
+      - monitoring_state_backup.stat.exists
+    fail_msg: >-
+      Monitoring state backup is missing:
+      {{ monitoring_backup_dir }}/{{ monitoring_backup_file }}
+
+- name: Validate monitoring state backup
+  ansible.builtin.command:
+    argv:
+      - tar
+      - -tzf
+      - "{{ monitoring_backup_dir }}/{{ monitoring_backup_file }}"
+  changed_when: false
+
+- name: Stop monitoring state services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: stopped
+  loop:
+    - prometheus
+    - loki
+    - grafana-server
+
+- name: Remove fresh Prometheus state
+  ansible.builtin.file:
+    path: "{{ prometheus_data_dir }}"
+    state: absent
+
+- name: Remove fresh Loki state
+  ansible.builtin.file:
+    path: "{{ loki_data_dir }}"
+    state: absent
+
+- name: Remove fresh Grafana state
+  ansible.builtin.file:
+    path: /var/lib/grafana
+    state: absent
+
+- name: Restore monitoring state
+  ansible.builtin.unarchive:
+    src: "{{ monitoring_backup_dir }}/{{ monitoring_backup_file }}"
+    dest: /
+    remote_src: true
+
+- name: Restore Prometheus ownership
+  ansible.builtin.file:
+    path: "{{ prometheus_data_dir }}"
+    owner: "{{ prometheus_user }}"
+    group: "{{ prometheus_group }}"
+    recurse: true
+
+- name: Restore Loki ownership
+  ansible.builtin.file:
+    path: "{{ loki_data_dir }}"
+    owner: "{{ loki_user }}"
+    group: "{{ loki_group }}"
+    recurse: true
+
+- name: Restore Grafana ownership
+  ansible.builtin.file:
+    path: /var/lib/grafana
+    owner: grafana
+    group: grafana
+    recurse: true
+
+- name: Start Prometheus
+  ansible.builtin.systemd:
+    name: prometheus
+    enabled: true
+    state: started
+
+- name: Start Loki
+  ansible.builtin.systemd:
+    name: loki
+    enabled: true
+    state: started
+
+- name: Start Grafana
+  ansible.builtin.systemd:
+    name: grafana-server
+    enabled: true
+    state: started

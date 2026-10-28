@@ -1,0 +1,46 @@
+---
+- name: Restore backend base configuration
+  hosts: backends
+  become: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require single backend recovery target
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+        fail_msg: >-
+          Backend recovery must target exactly one backend.
+          Use --limit backend01 or --limit backend02.
+
+  roles:
+    - common
+    - backend_firewall
+
+
+- name: Recover Gluster backend member
+  hosts: backends
+  become: true
+  serial: 1
+
+  roles:
+    - gluster_recovery
+
+
+- name: Restore WordPress backend
+  hosts: backends
+  become: true
+  serial: 1
+
+  roles:
+    - wordpress
+
+
+- name: Restore backend monitoring
+  hosts: backends
+  become: true
+  serial: 1
+
+  roles:
+    - node_exporter
+    - alloy

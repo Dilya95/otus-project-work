@@ -1,0 +1,44 @@
+upstream wordpress_backend {
+{% for backend in backend_servers %}
+    server {{ backend.address }};
+{% endfor %}
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name {{ nginx_server_name }};
+
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+
+    server_name {{ nginx_server_name }};
+
+    ssl_certificate     /etc/nginx/ssl/project.local.crt;
+    ssl_certificate_key /etc/nginx/ssl/project.local.key;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    access_log /var/log/nginx/project-access.log;
+    error_log  /var/log/nginx/project-error.log;
+
+    location / {
+        proxy_pass http://wordpress_backend;
+
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+}

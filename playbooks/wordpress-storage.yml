@@ -1,0 +1,8 @@
+---
+- name: Configure shared WordPress storage
+  hosts:
+    - backends
+    - monitoring_nodes
+  become: true
+  roles:
+    - wordpress_storage

@@ -1,0 +1,44 @@
+#!/bin/bash
+set -euo pipefail
+
+BACKUP_DIR="{{ backup_base_dir }}/mariadb"
+EXTERNAL_BACKUP_DIR="{{ external_backup_base_dir }}/mariadb"
+DATABASE="{{ wordpress_db_name }}"
+TIMESTAMP="$(date -u +%Y-%m-%d_%H%M%S)"
+
+TMP_FILE="${BACKUP_DIR}/.${DATABASE}-${TIMESTAMP}.sql.gz.tmp"
+FINAL_FILE="${BACKUP_DIR}/${DATABASE}-${TIMESTAMP}.sql.gz"
+EXTERNAL_FILE="${EXTERNAL_BACKUP_DIR}/${DATABASE}-${TIMESTAMP}.sql.gz"
+
+mkdir -p "${BACKUP_DIR}"
+mkdir -p "${EXTERNAL_BACKUP_DIR}"
+
+mariadb-dump \
+  --single-transaction \
+  --quick \
+  --routines \
+  --triggers \
+  --events \
+  --databases "${DATABASE}" \
+  | gzip -9 > "${TMP_FILE}"
+
+test -s "${TMP_FILE}"
+gzip -t "${TMP_FILE}"
+
+mv "${TMP_FILE}" "${FINAL_FILE}"
+
+cp "${FINAL_FILE}" "${EXTERNAL_FILE}"
+
+gzip -t "${EXTERNAL_FILE}"
+
+find "${BACKUP_DIR}" \
+  -type f \
+  -name "${DATABASE}-*.sql.gz" \
+  -mtime +{{ backup_retention_days }} \
+  -delete
+
+find "${EXTERNAL_BACKUP_DIR}" \
+  -type f \
+  -name "${DATABASE}-*.sql.gz" \
+  -mtime +{{ backup_retention_days }} \
+  -delete

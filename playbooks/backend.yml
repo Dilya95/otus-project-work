@@ -1,0 +1,7 @@
+---
+- name: Configure WordPress backend servers
+  hosts: backends
+  become: true
+
+  roles:
+    - wordpress

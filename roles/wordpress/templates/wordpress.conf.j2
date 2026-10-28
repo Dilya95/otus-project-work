@@ -1,0 +1,16 @@
+<VirtualHost *:80>
+    ServerName project.local
+
+    DocumentRoot {{ apache_document_root }}
+
+    <Directory {{ apache_document_root }}>
+        Options FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/wordpress-error.log
+    CustomLog ${APACHE_LOG_DIR}/wordpress-access.log combined
+
+    Header always set X-Backend-Server "{{ inventory_hostname }}"
+</VirtualHost>

@@ -1,0 +1,178 @@
+---
+- name: Require replica recovery target
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname == 'db02'
+      - mariadb_role == 'replica'
+    fail_msg: >-
+      This recovery procedure is currently intended only for db02 replica.
+
+- name: Stop Apache during database replica recovery
+  ansible.builtin.systemd:
+    name: apache2
+    state: stopped
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['backends'] }}"
+
+- name: Create temporary recovery directory on primary
+  ansible.builtin.file:
+    path: /var/tmp/otus-mariadb-recovery
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  delegate_to: db01
+
+- name: Create consistent MariaDB recovery dump on primary
+  ansible.builtin.shell: |
+    set -o pipefail
+    mariadb-dump \
+      --single-transaction \
+      --quick \
+      --routines \
+      --triggers \
+      --events \
+      --master-data=2 \
+      --gtid \
+      --databases "{{ wordpress_db_name }}" \
+      > /var/tmp/otus-mariadb-recovery/wordpress.sql
+  args:
+    executable: /bin/bash
+  delegate_to: db01
+  changed_when: true
+
+- name: Fetch recovery dump from primary
+  ansible.builtin.fetch:
+    src: /var/tmp/otus-mariadb-recovery/wordpress.sql
+    dest: /tmp/otus-wordpress-recovery.sql
+    flat: true
+  delegate_to: db01
+
+- name: Copy recovery dump to replica
+  ansible.builtin.copy:
+    src: /tmp/otus-wordpress-recovery.sql
+    dest: /var/tmp/otus-wordpress-recovery.sql
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Stop existing replication
+  ansible.builtin.command:
+    cmd: mariadb -e "STOP SLAVE;"
+  failed_when: false
+  changed_when: true
+
+- name: Reset existing replication configuration
+  ansible.builtin.command:
+    cmd: mariadb -e "RESET SLAVE ALL;"
+  failed_when: false
+  changed_when: true
+
+- name: Drop existing WordPress database
+  ansible.mysql.mysql_db:
+    name: "{{ wordpress_db_name }}"
+    state: absent
+    login_unix_socket: /run/mysqld/mysqld.sock
+
+- name: Extract GTID position from recovery dump
+  ansible.builtin.shell: |
+    set -o pipefail
+    sed -n "s/^-- SET GLOBAL gtid_slave_pos='\([^']*\)';/\1/p" \
+      /var/tmp/otus-wordpress-recovery.sql |
+      head -n 1
+  args:
+    executable: /bin/bash
+  register: mariadb_recovery_gtid
+  changed_when: false
+
+- name: Require valid GTID position
+  ansible.builtin.assert:
+    that:
+      - mariadb_recovery_gtid.stdout | trim | length > 0
+    fail_msg: >-
+      GTID position could not be extracted from the MariaDB recovery dump.
+
+- name: Restore WordPress database without generating local GTIDs
+  ansible.builtin.shell: |
+    set -o pipefail
+    {
+      echo "SET SESSION sql_log_bin=0;"
+      cat /var/tmp/otus-wordpress-recovery.sql
+    } | mariadb
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Set replica GTID position
+  ansible.builtin.command:
+    cmd: >-
+      mariadb -e
+      "SET GLOBAL gtid_slave_pos='{{ mariadb_recovery_gtid.stdout | trim }}';"
+  changed_when: true
+
+- name: Configure GTID replication
+  ansible.builtin.command:
+    cmd: >
+      mariadb -e "
+      CHANGE MASTER TO
+      MASTER_HOST='{{ mariadb_primary_ip }}',
+      MASTER_USER='{{ mariadb_replication_user }}',
+      MASTER_PASSWORD='{{ vault_mariadb_replication_password }}',
+      MASTER_PORT={{ mariadb_port }},
+      MASTER_USE_GTID=slave_pos;
+      START SLAVE;"
+  no_log: true
+  changed_when: true
+
+- name: Wait for MariaDB replication
+  ansible.builtin.shell: |
+    set -o pipefail
+    status="$(mariadb -e 'SHOW SLAVE STATUS\G')"
+
+    echo "$status" | grep -q 'Slave_IO_Running: Yes'
+    echo "$status" | grep -q 'Slave_SQL_Running: Yes'
+  args:
+    executable: /bin/bash
+  register: mariadb_replication_health
+  changed_when: false
+  retries: 20
+  delay: 3
+  until: mariadb_replication_health.rc == 0
+
+- name: Verify replica is caught up
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    lag="$(
+      mariadb -e 'SHOW SLAVE STATUS\G' |
+      sed -n 's/^[[:space:]]*Seconds_Behind_Master:[[:space:]]*//p' |
+      head -n 1
+    )"
+
+    test "$lag" = "0"
+  args:
+    executable: /bin/bash
+  register: mariadb_replication_lag
+  changed_when: false
+  retries: 20
+  delay: 3
+  until: mariadb_replication_lag.rc == 0
+
+- name: Start Apache after database replica recovery
+  ansible.builtin.systemd:
+    name: apache2
+    enabled: true
+    state: started
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['backends'] }}"
+
+- name: Remove recovery dump from replica
+  ansible.builtin.file:
+    path: /var/tmp/otus-wordpress-recovery.sql
+    state: absent
+
+- name: Remove recovery dump from primary
+  ansible.builtin.file:
+    path: /var/tmp/otus-mariadb-recovery/wordpress.sql
+    state: absent
+  delegate_to: db01

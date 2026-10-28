@@ -1,0 +1,10 @@
+[Unit]
+Description=OTUS WordPress wp-content backup
+After=glusterd.service
+Requires=glusterd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/otus-wordpress-backup.sh
+User=root
+Group=root

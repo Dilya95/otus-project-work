@@ -1,0 +1,35 @@
+---
+- name: Install MariaDB server and Python MySQL library
+  ansible.builtin.apt:
+    name:
+      - mariadb-server
+      - mariadb-client
+      - python3-pymysql
+    state: present
+    update_cache: true
+
+- name: Create MariaDB log directory
+  ansible.builtin.file:
+    path: /var/log/mysql
+    state: directory
+    owner: mysql
+    group: mysql
+    mode: "0750"
+
+- name: Deploy MariaDB project configuration
+  ansible.builtin.template:
+    src: 60-project.cnf.j2
+    dest: /etc/mysql/mariadb.conf.d/60-project.cnf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart MariaDB
+
+- name: Enable and start MariaDB
+  ansible.builtin.systemd:
+    name: mariadb
+    enabled: true
+    state: started
+
+- name: Apply MariaDB configuration changes
+  ansible.builtin.meta: flush_handlers

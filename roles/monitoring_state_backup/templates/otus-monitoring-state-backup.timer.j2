@@ -1,0 +1,9 @@
+[Unit]
+Description=OTUS monitoring state backup timer
+
+[Timer]
+OnCalendar=*-*-* {{ "%02d" | format(monitoring_backup_hour) }}:{{ "%02d" | format(monitoring_backup_minute) }}:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

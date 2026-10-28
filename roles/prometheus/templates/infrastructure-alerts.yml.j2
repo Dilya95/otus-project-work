@@ -1,0 +1,138 @@
+groups:
+  - name: infrastructure
+    rules:
+
+      - alert: NodeDown
+        expr: up{job="node_exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Server {{ '{{' }} $labels.instance {{ '}}' }} is unavailable"
+          description: "Prometheus cannot scrape Node Exporter on {{ '{{' }} $labels.instance {{ '}}' }} for more than 1 minute."
+
+      - alert: HighCPU
+        expr: |
+          100 - (
+            avg by(instance) (
+              rate(node_cpu_seconds_total{
+                job="node_exporter",
+                mode="idle"
+              }[5m])
+            ) * 100
+          ) > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: "CPU usage has been above 90% for more than 5 minutes."
+
+      - alert: HighMemory
+        expr: |
+          (
+            1 -
+            (
+              node_memory_MemAvailable_bytes{job="node_exporter"}
+              /
+              node_memory_MemTotal_bytes{job="node_exporter"}
+            )
+          ) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: "Memory usage has been above 90% for more than 5 minutes."
+
+      - alert: DiskSpaceLow
+        expr: |
+          (
+            1 -
+            (
+              node_filesystem_avail_bytes{
+                job="node_exporter",
+                mountpoint="/",
+                fstype!~"tmpfs|overlay"
+              }
+              /
+              node_filesystem_size_bytes{
+                job="node_exporter",
+                mountpoint="/",
+                fstype!~"tmpfs|overlay"
+              }
+            )
+          ) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Low disk space on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: "Root filesystem usage has been above 90% for more than 5 minutes."
+
+      - alert: WebsiteDown
+        expr: probe_success{job="blackbox_frontend"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "WordPress website is unavailable"
+          description: "The public HTTPS endpoint has failed for more than 30 seconds."
+
+      - alert: BackendDown
+        expr: probe_success{job="blackbox_backends"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backend {{ '{{' }} $labels.instance {{ '}}' }} is unavailable"
+          description: "HTTP probe to backend {{ '{{' }} $labels.instance {{ '}}' }} has failed for more than 30 seconds."
+
+      - alert: MariaDBDown
+        expr: |
+          up{job="mysqld_exporter"} == 0
+          or
+          mysql_up{job="mysqld_exporter"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "MariaDB on {{ '{{' }} $labels.instance {{ '}}' }} is unavailable"
+          description: "Prometheus cannot reach mysqld_exporter or mysqld_exporter cannot connect to MariaDB for more than 30 seconds."
+
+      - alert: MariaDBReplicationStopped
+        expr: |
+          mysql_slave_status_slave_io_running{
+            job="mysqld_exporter",
+            db_role="replica"
+          } == 0
+          or
+          mysql_slave_status_slave_sql_running{
+            job="mysqld_exporter",
+            db_role="replica"
+          } == 0
+          or
+          mysql_exporter_collector_success{
+            job="mysqld_exporter",
+            db_role="replica",
+            collector="collect.slave_status"
+          } == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "MariaDB replication on {{ '{{' }} $labels.instance {{ '}}' }} is not healthy"
+          description: "The replication IO thread, SQL thread, or slave_status collector has been unhealthy for more than 30 seconds."
+
+      - alert: MariaDBReplicationLag
+        expr: |
+          mysql_slave_status_seconds_behind_master{
+            job="mysqld_exporter",
+            db_role="replica"
+          } > 30
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MariaDB replication lag is high on {{ '{{' }} $labels.instance {{ '}}' }}"
+          description: "The replica has been more than 30 seconds behind the primary for more than 2 minutes."

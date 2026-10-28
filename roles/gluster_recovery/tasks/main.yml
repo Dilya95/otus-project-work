@@ -1,0 +1,208 @@
+---
+- name: Check current Gluster identity
+  ansible.builtin.stat:
+    path: /var/lib/glusterd/glusterd.info
+  register: gluster_identity
+
+- name: Detect fresh Gluster replacement node
+  ansible.builtin.set_fact:
+    gluster_recovery_required: "{{ not gluster_identity.stat.exists }}"
+
+- name: Select surviving Gluster recovery coordinator
+  ansible.builtin.set_fact:
+    gluster_recovery_coordinator: >-
+      {{
+        'backend02'
+        if inventory_hostname == 'backend01'
+        else 'backend01'
+      }}
+
+- name: Check external Gluster metadata backup
+  ansible.builtin.stat:
+    path: "{{ gluster_metadata_backup_base_dir }}/{{ inventory_hostname }}/{{ gluster_metadata_backup_file }}"
+  register: gluster_metadata_backup
+
+- name: Require Gluster metadata backup for fresh node
+  ansible.builtin.assert:
+    that:
+      - not gluster_recovery_required or gluster_metadata_backup.stat.exists
+    fail_msg: >-
+      Fresh Gluster node detected, but metadata backup for
+      {{ inventory_hostname }} is missing.
+
+- name: Install GlusterFS packages
+  ansible.builtin.apt:
+    name:
+      - glusterfs-server
+      - glusterfs-client
+      - rsync
+    state: present
+    update_cache: false
+
+- name: Stop glusterd before metadata restore
+  ansible.builtin.systemd:
+    name: glusterd
+    state: stopped
+  when: gluster_recovery_required
+
+- name: Remove generated Gluster metadata
+  ansible.builtin.file:
+    path: /var/lib/glusterd
+    state: absent
+  when: gluster_recovery_required
+
+- name: Restore saved Gluster metadata
+  ansible.builtin.unarchive:
+    src: "{{ gluster_metadata_backup_base_dir }}/{{ inventory_hostname }}/{{ gluster_metadata_backup_file }}"
+    dest: /
+    remote_src: true
+  when: gluster_recovery_required
+
+- name: Create Gluster brick directory
+  ansible.builtin.file:
+    path: "{{ wordpress_gluster_data_brick }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Enable and start glusterd
+  ansible.builtin.systemd:
+    name: glusterd
+    enabled: true
+    state: started
+
+- name: Wait for Gluster management port
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: 24007
+    timeout: 60
+
+- name: Wait for recovered peer to reconnect
+  ansible.builtin.shell: |
+    set -o pipefail
+    gluster peer status |
+    grep -A 4 -F "Hostname: {{ ansible_host }}" |
+    grep -Fq "Peer in Cluster (Connected)"
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ gluster_recovery_coordinator }}"
+  register: gluster_peer_reconnect
+  changed_when: false
+  retries: 20
+  delay: 3
+  until: gluster_peer_reconnect.rc == 0
+  when:
+    - gluster_recovery_required
+
+- name: Start Gluster brick reset
+  ansible.builtin.command:
+    argv:
+      - gluster
+      - volume
+      - reset-brick
+      - "{{ wordpress_gluster_volume }}"
+      - "{{ ansible_host }}:{{ wordpress_gluster_data_brick }}"
+      - start
+  delegate_to: "{{ gluster_recovery_coordinator }}"
+  when: gluster_recovery_required
+
+- name: Commit Gluster brick reset
+  ansible.builtin.command:
+    argv:
+      - gluster
+      - volume
+      - reset-brick
+      - "{{ wordpress_gluster_volume }}"
+      - "{{ ansible_host }}:{{ wordpress_gluster_data_brick }}"
+      - "{{ ansible_host }}:{{ wordpress_gluster_data_brick }}"
+      - commit
+      - force
+  delegate_to: "{{ gluster_recovery_coordinator }}"
+  when: gluster_recovery_required
+
+- name: Start full Gluster heal
+  ansible.builtin.command:
+    argv:
+      - gluster
+      - volume
+      - heal
+      - "{{ wordpress_gluster_volume }}"
+      - full
+  delegate_to: "{{ gluster_recovery_coordinator }}"
+  when: gluster_recovery_required
+
+- name: Wait for Gluster heal to complete
+  ansible.builtin.shell: |
+    set -o pipefail
+
+    output="$(gluster volume heal {{ wordpress_gluster_volume }} info)"
+    echo "$output"
+
+    ! echo "$output" | grep -Eq \
+      'Number of entries: [1-9][0-9]*|Transport endpoint is not connected'
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ gluster_recovery_coordinator }}"
+  register: gluster_heal
+  changed_when: false
+  retries: 30
+  delay: 5
+  until: gluster_heal.rc == 0
+  when: gluster_recovery_required
+
+- name: Create WordPress root directory
+  ansible.builtin.file:
+    path: /var/www/wordpress
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Create WordPress wp-content mountpoint
+  ansible.builtin.file:
+    path: "{{ wordpress_gluster_mount }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure WordPress Gluster mount
+  ansible.builtin.lineinfile:
+    path: /etc/fstab
+    regexp: '^[^#].*\s/var/www/wordpress/wp-content\s+glusterfs\s'
+    line: "{{ ansible_host }}:/{{ wordpress_gluster_volume }} {{ wordpress_gluster_mount }} glusterfs defaults,_netdev,x-systemd.automount,x-systemd.requires=glusterd.service 0 0"
+    state: present
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Check WordPress Gluster mount
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ wordpress_gluster_mount }}"
+  register: wordpress_gluster_mount_check
+  failed_when: false
+  changed_when: false
+
+- name: Mount WordPress Gluster volume
+  ansible.builtin.command:
+    argv:
+      - mount
+      - "{{ wordpress_gluster_mount }}"
+  when: wordpress_gluster_mount_check.rc != 0
+
+- name: Verify WordPress Gluster mount
+  ansible.builtin.command:
+    argv:
+      - mountpoint
+      - -q
+      - "{{ wordpress_gluster_mount }}"
+  changed_when: false
+
+- name: Refresh Gluster metadata backup
+  ansible.builtin.include_role:
+    name: gluster_metadata_backup

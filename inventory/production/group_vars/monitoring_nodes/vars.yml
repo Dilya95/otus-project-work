@@ -1,0 +1,37 @@
+---
+prometheus_version: "3.7.1"
+
+prometheus_user: "prometheus"
+prometheus_group: "prometheus"
+
+prometheus_config_dir: "/etc/prometheus"
+prometheus_data_dir: "/var/lib/prometheus"
+
+prometheus_port: 9090
+
+grafana_port: 3000
+grafana_admin_user: "admin"
+
+alertmanager_version: "0.28.1"
+
+alertmanager_user: "alertmanager"
+alertmanager_group: "alertmanager"
+
+alertmanager_config_dir: "/etc/alertmanager"
+alertmanager_data_dir: "/var/lib/alertmanager"
+
+alertmanager_port: 9093
+
+blackbox_exporter_version: "0.27.0"
+blackbox_exporter_user: "blackbox_exporter"
+blackbox_exporter_group: "blackbox_exporter"
+
+blackbox_exporter_config_dir: "/etc/blackbox_exporter"
+blackbox_exporter_port: 9115
+
+loki_version: "3.5.5"
+loki_user: "loki"
+loki_group: "loki"
+loki_port: 3100
+loki_config_dir: "/etc/loki"
+loki_data_dir: "/var/lib/loki"

@@ -1,0 +1,8 @@
+---
+- name: Configure frontend Nginx load balancer
+  hosts: frontends
+  become: true
+
+  roles:
+    - nginx_frontend
+    - firewall_frontend

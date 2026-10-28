@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+BACKUP_DIR="{{ monitoring_backup_dir }}"
+BACKUP_FILE="${BACKUP_DIR}/{{ monitoring_backup_file }}"
+TEMP_FILE="${BACKUP_FILE}.tmp"
+
+services=(
+  prometheus
+  loki
+  grafana-server
+)
+
+restart_services() {
+  for service in "${services[@]}"; do
+    systemctl start "$service" || true
+  done
+}
+
+trap restart_services EXIT
+
+mkdir -p "$BACKUP_DIR"
+
+for service in "${services[@]}"; do
+  systemctl stop "$service"
+done
+
+rm -f "$TEMP_FILE"
+
+tar \
+  --numeric-owner \
+  -czf "$TEMP_FILE" \
+  "{{ prometheus_data_dir }}" \
+  "{{ loki_data_dir }}" \
+  "/var/lib/grafana"
+
+tar -tzf "$TEMP_FILE" >/dev/null
+
+mv -f "$TEMP_FILE" "$BACKUP_FILE"
+
+for service in "${services[@]}"; do
+  systemctl start "$service"
+done
+
+trap - EXIT

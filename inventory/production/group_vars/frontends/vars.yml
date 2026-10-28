@@ -1,0 +1,12 @@
+---
+nginx_server_name: "project.local"
+
+backend_servers:
+  - name: backend01
+    address: "172.16.20.21:80"
+  - name: backend02
+    address: "172.16.20.22:80"
+
+management_network: "192.168.56.0/24"
+
+monitoring_ip: "192.168.56.40"

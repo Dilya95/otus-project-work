@@ -1,0 +1,45 @@
+---
+- name: Require monitoring node
+  ansible.builtin.assert:
+    that:
+      - inventory_hostname in groups['monitoring_nodes']
+    fail_msg: "Monitoring state backup can only run on a monitoring node."
+
+- name: Create monitoring backup directory
+  ansible.builtin.file:
+    path: "{{ monitoring_backup_dir }}"
+    state: directory
+
+- name: Deploy monitoring state backup script
+  ansible.builtin.template:
+    src: otus-monitoring-state-backup.sh.j2
+    dest: /usr/local/sbin/otus-monitoring-state-backup.sh
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Deploy monitoring state backup service
+  ansible.builtin.template:
+    src: otus-monitoring-state-backup.service.j2
+    dest: /etc/systemd/system/otus-monitoring-state-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Deploy monitoring state backup timer
+  ansible.builtin.template:
+    src: otus-monitoring-state-backup.timer.j2
+    dest: /etc/systemd/system/otus-monitoring-state-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Enable and start monitoring state backup timer
+  ansible.builtin.systemd:
+    name: otus-monitoring-state-backup.timer
+    enabled: true
+    state: started

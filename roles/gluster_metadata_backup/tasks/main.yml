@@ -1,0 +1,71 @@
+---
+- name: Check Gluster metadata
+  ansible.builtin.stat:
+    path: /var/lib/glusterd/glusterd.info
+  register: gluster_metadata_state
+
+- name: Create shared Gluster metadata backup root
+  ansible.builtin.file:
+    path: "{{ gluster_metadata_backup_base_dir }}"
+    state: directory
+    mode: "0755"
+  run_once: true
+  delegate_to: backend01
+
+- name: Create host Gluster metadata backup directory
+  ansible.builtin.file:
+    path: "{{ gluster_metadata_backup_base_dir }}/{{ inventory_hostname }}"
+    state: directory
+    mode: "0755"
+  when: gluster_metadata_state.stat.exists
+
+- name: Create Gluster metadata backup
+  ansible.builtin.command:
+    argv:
+      - tar
+      - -C
+      - /
+      - -czf
+      - "{{ gluster_metadata_backup_base_dir }}/{{ inventory_hostname }}/{{ gluster_metadata_backup_file }}"
+      - var/lib/glusterd
+  when: gluster_metadata_state.stat.exists
+  changed_when: true
+
+- name: Deploy Gluster metadata backup script
+  ansible.builtin.template:
+    src: otus-gluster-metadata-backup.sh.j2
+    dest: /usr/local/sbin/otus-gluster-metadata-backup.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: gluster_metadata_state.stat.exists
+
+- name: Deploy Gluster metadata backup service
+  ansible.builtin.template:
+    src: otus-gluster-metadata-backup.service.j2
+    dest: /etc/systemd/system/otus-gluster-metadata-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: gluster_metadata_state.stat.exists
+
+- name: Deploy Gluster metadata backup timer
+  ansible.builtin.template:
+    src: otus-gluster-metadata-backup.timer.j2
+    dest: /etc/systemd/system/otus-gluster-metadata-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+  when: gluster_metadata_state.stat.exists
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: gluster_metadata_state.stat.exists
+
+- name: Enable Gluster metadata backup timer
+  ansible.builtin.systemd:
+    name: otus-gluster-metadata-backup.timer
+    enabled: true
+    state: started
+  when: gluster_metadata_state.stat.exists

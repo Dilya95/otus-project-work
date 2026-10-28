@@ -1,0 +1,8 @@
+[Unit]
+Description=OTUS monitoring state backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/otus-monitoring-state-backup.sh

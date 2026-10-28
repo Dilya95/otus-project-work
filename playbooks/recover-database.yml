@@ -1,0 +1,51 @@
+---
+- name: Restore database base configuration
+  hosts: databases
+  become: true
+  serial: 1
+
+  pre_tasks:
+    - name: Require single database recovery target
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+        fail_msg: >-
+          Database recovery must target exactly one database server.
+          Use --limit db01 or --limit db02.
+
+  roles:
+    - common
+    - database_firewall
+    - mariadb
+
+
+- name: Recover MariaDB database member
+  hosts: databases
+  become: true
+  serial: 1
+
+  roles:
+    - role: mariadb_recovery
+      when: mariadb_role == 'replica'
+
+    - role: mariadb_primary_recovery
+      when: mariadb_role == 'primary'
+
+
+- name: Restore database monitoring
+  hosts: databases
+  become: true
+  serial: 1
+
+  roles:
+    - node_exporter
+    - mysqld_exporter
+    - alloy
+
+
+- name: Restore MariaDB backup automation
+  hosts: db01
+  become: true
+
+  roles:
+    - backup

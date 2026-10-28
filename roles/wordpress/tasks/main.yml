@@ -1,0 +1,160 @@
+---
+- name: Install Apache, PHP and required packages
+  ansible.builtin.apt:
+    name: "{{ ['apache2', 'curl', 'tar'] + php_packages }}"
+    state: present
+    update_cache: true
+
+- name: Download WP-CLI
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+    dest: /usr/local/bin/wp
+    mode: "0755"
+
+- name: Create WordPress directory
+  ansible.builtin.file:
+    path: "{{ wordpress_path }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0755"
+
+- name: Download WordPress
+  ansible.builtin.get_url:
+    url: https://wordpress.org/latest.tar.gz
+    dest: /tmp/wordpress.tar.gz
+    mode: "0644"
+
+- name: Extract WordPress into document root
+  ansible.builtin.unarchive:
+    src: /tmp/wordpress.tar.gz
+    dest: "{{ wordpress_path }}"
+    remote_src: true
+    extra_opts:
+      - --strip-components=1
+    creates: "{{ wordpress_path }}/wp-settings.php"
+
+- name: Set WordPress ownership
+  ansible.builtin.file:
+    path: "{{ wordpress_path }}"
+    owner: www-data
+    group: www-data
+    recurse: true
+
+- name: Deploy WordPress configuration
+  ansible.builtin.template:
+    src: wp-config.php.j2
+    dest: "{{ wordpress_path }}/wp-config.php"
+    owner: www-data
+    group: www-data
+    mode: "0640"
+  notify: Restart Apache
+
+- name: Check if WordPress is already installed
+  ansible.builtin.command:
+    cmd: >
+      wp core is-installed
+      --path={{ wordpress_path }}
+      --allow-root
+  register: wordpress_installed
+  changed_when: false
+  failed_when: false
+  run_once: true
+
+- name: Read current WordPress siteurl
+  ansible.builtin.command:
+    cmd: >
+      wp option get siteurl
+      --path={{ wordpress_path }}
+      --allow-root
+  register: current_wordpress_siteurl
+  changed_when: false
+  run_once: true
+
+- name: Update WordPress siteurl
+  ansible.builtin.command:
+    cmd: >
+      wp option update siteurl {{ wordpress_url }}
+      --path={{ wordpress_path }}
+      --allow-root
+  when: current_wordpress_siteurl.stdout | trim != wordpress_url
+  run_once: true
+
+- name: Read current WordPress home URL
+  ansible.builtin.command:
+    cmd: >
+      wp option get home
+      --path={{ wordpress_path }}
+      --allow-root
+  register: current_wordpress_home
+  changed_when: false
+  run_once: true
+
+- name: Update WordPress home URL
+  ansible.builtin.command:
+    cmd: >
+      wp option update home {{ wordpress_url }}
+      --path={{ wordpress_path }}
+      --allow-root
+  when: current_wordpress_home.stdout | trim != wordpress_url
+  run_once: true
+
+- name: Install WordPress
+  ansible.builtin.command:
+    cmd: >
+      wp core install
+      --path={{ wordpress_path }}
+      --url={{ wordpress_url }}
+      --title="{{ wordpress_title }}"
+      --admin_user={{ wordpress_admin_user }}
+      --admin_password={{ vault_wordpress_admin_password }}
+      --admin_email={{ wordpress_admin_email }}
+      --skip-email
+      --allow-root
+  when:
+    - wordpress_installed.rc != 0
+  run_once: true
+  no_log: true
+
+- name: Deploy Apache virtual host
+  ansible.builtin.template:
+    src: wordpress.conf.j2
+    dest: /etc/apache2/sites-available/wordpress.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Apache
+
+- name: Disable default Apache site
+  ansible.builtin.command:
+    cmd: a2dissite 000-default.conf
+  register: disable_default_site
+  changed_when: "'Site 000-default disabled' in disable_default_site.stdout"
+  notify: Restart Apache
+
+- name: Enable WordPress Apache site
+  ansible.builtin.command:
+    cmd: a2ensite wordpress.conf
+  register: enable_wordpress_site
+  changed_when: "'Enabling site wordpress' in enable_wordpress_site.stdout"
+  notify: Restart Apache
+
+- name: Enable Apache rewrite module
+  ansible.builtin.command:
+    cmd: a2enmod rewrite
+  register: enable_rewrite
+  changed_when: "'Enabling module rewrite' in enable_rewrite.stdout"
+  notify: Restart Apache
+
+- name: Enable Apache headers module
+  ansible.builtin.command:
+    cmd: a2enmod headers
+  register: enable_headers
+  changed_when: "'Enabling module headers' in enable_headers.stdout"
+  notify: Restart Apache
+
+- name: Ensure Apache is enabled and running
+  ansible.builtin.systemd:
+    name: apache2
+    enabled: true
+    state: started

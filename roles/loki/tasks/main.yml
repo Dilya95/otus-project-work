@@ -1,0 +1,87 @@
+---
+- name: Create Loki group
+  ansible.builtin.group:
+    name: "{{ loki_group }}"
+    system: true
+
+- name: Create Loki user
+  ansible.builtin.user:
+    name: "{{ loki_user }}"
+    group: "{{ loki_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Create Loki directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ loki_user }}"
+    group: "{{ loki_group }}"
+    mode: "0755"
+  loop:
+    - "{{ loki_config_dir }}"
+    - "{{ loki_data_dir }}"
+
+- name: Check Loki binary
+  ansible.builtin.stat:
+    path: /usr/local/bin/loki
+  register: loki_binary
+
+- name: Download Loki
+  ansible.builtin.get_url:
+    url: "https://github.com/grafana/loki/releases/download/v{{ loki_version }}/loki-linux-arm64.zip"
+    dest: "/tmp/loki-linux-arm64.zip"
+    mode: "0644"
+  when: not loki_binary.stat.exists
+
+- name: Install unzip
+  ansible.builtin.apt:
+    name: unzip
+    state: present
+    update_cache: false
+
+- name: Extract Loki
+  ansible.builtin.unarchive:
+    src: "/tmp/loki-linux-arm64.zip"
+    dest: /tmp
+    remote_src: true
+  when: not loki_binary.stat.exists
+
+- name: Install Loki binary
+  ansible.builtin.copy:
+    src: /tmp/loki-linux-arm64
+    dest: /usr/local/bin/loki
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when: not loki_binary.stat.exists
+  notify: Restart Loki
+
+- name: Deploy Loki configuration
+  ansible.builtin.template:
+    src: loki.yml.j2
+    dest: "{{ loki_config_dir }}/loki.yml"
+    owner: "{{ loki_user }}"
+    group: "{{ loki_group }}"
+    mode: "0644"
+  notify: Restart Loki
+
+- name: Deploy Loki systemd service
+  ansible.builtin.template:
+    src: loki.service.j2
+    dest: /etc/systemd/system/loki.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart Loki
+
+- name: Enable and start Loki
+  ansible.builtin.systemd:
+    name: loki
+    enabled: true
+    state: started
+    daemon_reload: true

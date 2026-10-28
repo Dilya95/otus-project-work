@@ -1,0 +1,7 @@
+---
+- name: Configure monitoring state backup
+  hosts: monitoring_nodes
+  become: true
+
+  roles:
+    - monitoring_state_backup
