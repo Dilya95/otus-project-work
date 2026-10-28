@@ -2,25 +2,20 @@
 
 ## Цели проектной работы:
 
-закрепить и продемонстрировать полученные знания и навыки;<br>
+- закрепить и продемонстрировать полученные знания и навыки;
+- создать веб-проект;
+- подготовить проект для профессионального портфолио.
 
-создать полноценный веб-проект;<br>
+По требованиям курса веб-проект с несколькими виртуальными машинами должен включать:
 
-подготовить проект, который можно использовать как часть профессионального портфолио.<br>
+- включен https;
+- сновная инфраструктура в DMZ зоне;
+- firewall на входе;
+- сбор метрик и настроенный алертинг;
+- организован централизованный сбор логов;
+- организован backup.
 
-
-
-Веб проект с развертыванием нескольких виртуальных машин должен отвечать следующим требованиям:<br>
-
-включен https;<br>
-основная инфраструктура в DMZ зоне;<br>
-файрвалл на входе;<br>
-сбор метрик и настроенный алертинг;<br>
-организован централизованный сбор логов;<br>
-организован backup.<br>
-В моей реализации дополнительно реализованы отказоустойчивость web-части, MariaDB Primary/Replica, GlusterFS и автоматизированное восстановление после полного удаления отдельных VM.<br>
-
-
+В моей реализации дополнительно реализованы отказоустойчивость web-части, MariaDB Primary/Replica, GlusterFS и автоматизированное восстановление после полного удаления отдельных VM.
 
 
 ## Структура проекта
@@ -59,20 +54,10 @@
 ```
 
 
-
-
-## Выполнение
-
-### Стенд: Nginx + WordPress (PHP-FPM) + Django (Gunicorn/WSGI) + Node.js
-```
-Разворачивала вручную на своём компьютере через Docker Desktop / docker-compose.
-```
-
-
 ## Архитектура
 
 Проект состоит из шести виртуальных машин:
-
+```
 | VM | Назначение |
 |---|---|
 | `frontend` | Nginx, HTTPS, reverse proxy, балансировка |
@@ -81,6 +66,7 @@
 | `db01` | MariaDB PRIMARY |
 | `db02` | MariaDB REPLICA |
 | `monitoring` | Prometheus, Grafana, Loki, Alertmanager, Blackbox Exporter, GlusterFS arbiter |
+```
 
 Сети разделены по назначению:
 
@@ -88,10 +74,34 @@
 - application network — frontend ↔ backend;
 - database network — backend ↔ MariaDB.
 
-Публичной точкой входа является `frontend`. Внутренние backend- и database-узлы доступны только по необходимым направлениям, ограниченным `nftables`.
+```text
+                    HTTPS
+                      |
+                      v
+                 frontend
+                  Nginx
+                 /     \
+                v       v
+         backend01     backend02
+       Apache/WordPress Apache/WordPress
+                \       /
+                 \     /
+                  GlusterFS
+                Replica 2
+                 + Arbiter
+
+           backend01/02
+                |
+                v
+        db01 PRIMARY -> db02 REPLICA
+
+          monitoring
+ Prometheus / Grafana / Loki
+ Alertmanager / Blackbox / Alloy
+```
 
 ## Соответствие требованиям OTUS
-
+```
 | Требование | Реализация |
 |---|---|
 | Несколько VM | 6 VM под управлением Vagrant |
@@ -105,77 +115,33 @@
 | Backup | MariaDB, WordPress, GlusterFS metadata, monitoring state |
 | Автоматизация | Ansible |
 | Восстановление | проверено после полного удаления VM |
+```
 
-## Используемые технологии
 
-### Инфраструктура и автоматизация
-
-- Vagrant
-- VirtualBox
-- Ansible
-- Jinja2
-- Ansible Vault
-- systemd
-
-### Web
-
-- Nginx
-- Apache HTTP Server
-- PHP
-- WordPress
-- WP-CLI
-- HTTPS
-
-### Данные
-
-- MariaDB Primary/Replica
-- GTID replication
-- binary log
-- relay log
-- GlusterFS Replica 2 + Arbiter 1
-
-### Monitoring и logging
-
-- Prometheus
-- Node Exporter
-- mysqld_exporter
-- Blackbox Exporter
-- Grafana
-- Alertmanager
-- Telegram
-- Grafana Alloy
-- Loki
 
 ## Развёртывание
 
-Запуск VM:
+## Запуск проекта
+
+Запустить виртуальные машины:
 
 ```bash
 vagrant up
 ```
 
-Проверка Ansible:
+Проверить доступность:
 
 ```bash
 ansible all -m ping
 ```
 
-Полное конфигурирование:
+Развернуть инфраструктуру:
 
 ```bash
 ansible-playbook playbooks/site.yml
 ```
 
-После успешного запуска в `PLAY RECAP` ожидается:
-
-```text
-failed=0
-unreachable=0
-```
-
-## Доступ к сайту
-
-Добавить в `/etc/hosts`:
+Для доступа к сайту добавить:
 
 ```text
 192.168.56.10 project.local
@@ -186,156 +152,6 @@ unreachable=0
 ```text
 https://project.local
 ```
-
-## Web HA
-
-Nginx принимает HTTPS и балансирует запросы:
-
-```text
-Пользователь
-    |
-    v
-frontend
-    |
-    +--> backend01
-    |
-    +--> backend02
-```
-
-При потере одного backend сайт продолжает работать через второй.
-
-## WordPress и GlusterFS
-
-Оба backend используют общий `wp-content`.
-
-Состав GlusterFS:
-
-```text
-backend01  -> data brick
-backend02  -> data brick
-monitoring -> arbiter brick
-```
-
-Проверка:
-
-```bash
-sudo gluster volume status wp-content
-```
-
-Ожидается:
-
-```text
-Online: Y
-```
-
-Проверка heal:
-
-```bash
-sudo gluster volume heal wp-content info
-```
-
-После синхронизации:
-
-```text
-Number of entries: 0
-```
-
-## MariaDB replication
-
-Схема:
-
-```text
-db01 -> PRIMARY
-db02 -> REPLICA
-```
-
-Проверка replica:
-
-```bash
-vagrant ssh db02
-```
-
-```bash
-sudo mariadb -e "SHOW SLAVE STATUS\G"
-```
-
-Ожидается:
-
-```text
-Slave_IO_Running: Yes
-Slave_SQL_Running: Yes
-Seconds_Behind_Master: 0
-```
-
-## Monitoring
-
-На `monitoring` работают:
-
-- Prometheus;
-- Grafana;
-- Loki;
-- Alertmanager;
-- Blackbox Exporter;
-- Node Exporter;
-- Alloy.
-
-Контролируются:
-
-- доступность VM;
-- CPU;
-- RAM;
-- свободное место;
-- доступность сайта;
-- backend;
-- MariaDB;
-- replication;
-- replication lag.
-
-## Централизованный сбор логов
-
-```text
-VM logs
-  |
-  v
-Grafana Alloy
-  |
-  v
-Loki
-  |
-  v
-Grafana
-```
-
-Собираются systemd journal, Nginx logs и Apache logs.
-
-## Firewall
-
-На всех узлах используется `nftables`.
-
-Основная политика:
-
-```text
-input   -> ограничен
-forward -> ограничен
-output  -> разрешён
-```
-
-Разрешены только необходимые соединения между сервисами и сетевыми сегментами.
-
-## Backup
-
-Автоматические backup запускаются через systemd timers.
-
-Резервируются:
-
-- MariaDB;
-- WordPress;
-- GlusterFS metadata;
-- Prometheus;
-- Loki;
-- Grafana.
-
-Внешние копии хранятся через `/vagrant/backups` на хостовой системе.
 
 ## Восстановление после полного удаления VM
 
@@ -348,8 +164,6 @@ ansible frontend -m ping
 ansible-playbook playbooks/site.yml --limit frontend
 ```
 
-Отдельный recovery playbook не нужен, потому что `frontend` не содержит уникального persistent state.
-
 ### Backend
 
 ```bash
@@ -359,11 +173,7 @@ ansible backend01 -m ping
 ansible-playbook playbooks/recover-backend.yml --limit backend01
 ```
 
-Для `backend02` используется тот же playbook с `--limit backend02`.
-
-Recovery восстанавливает Gluster metadata, UUID, brick, membership, heal, mount `wp-content`, Apache, monitoring и logging.
-
-### db02
+### Database
 
 ```bash
 vagrant destroy -f db02
@@ -371,19 +181,6 @@ vagrant up db02
 ansible db02 -m ping
 ansible-playbook playbooks/recover-database.yml --limit db02
 ```
-
-Данные replica восстанавливаются с работающего `db01`, затем автоматически настраивается GTID replication.
-
-### db01
-
-```bash
-vagrant destroy -f db01
-vagrant up db01
-ansible db01 -m ping
-ansible-playbook playbooks/recover-database.yml --limit db01
-```
-
-Данные primary восстанавливаются с surviving replica `db02`, после чего восстанавливается исходная схема replication.
 
 ### Monitoring
 
@@ -394,48 +191,14 @@ ansible monitoring -m ping
 ansible-playbook playbooks/recover-monitoring.yml --limit monitoring
 ```
 
-Восстанавливаются сервисы monitoring, Gluster arbiter и историческое состояние Prometheus/Loki/Grafana.
+На практике проверено полное удаление и восстановление:
 
-## Проверенные сценарии
-
-Практически проверено полное удаление и восстановление:
-
-- `frontend`;
-- `backend01`;
-- `backend02`;
-- `db01`;
-- `db02`;
-- `monitoring`.
-
-## Идемпотентность
-
-Повторный запуск:
-
-```bash
-ansible-playbook playbooks/site.yml
-```
-
-для обычных конфигурационных задач не должен давать лишние изменения.
-
-Ожидается:
-
-```text
-changed=0
-failed=0
-```
-
-Исключение — задачи, которые специально создают новый backup, например backup GlusterFS metadata.
-
-## Основные playbooks
-
-| Playbook | Назначение |
-|---|---|
-| `playbooks/site.yml` | Полное развёртывание |
-| `playbooks/recover-backend.yml` | Восстановление backend |
-| `playbooks/recover-database.yml` | Восстановление db01/db02 |
-| `playbooks/recover-monitoring.yml` | Восстановление monitoring |
-
-
+- `frontend`
+- `backend01`
+- `backend02`
+- `db01`
+- `db02`
+- `monitoring`
 
 ## Результат
 
