@@ -24,6 +24,7 @@
 .
 ├── Vagrantfile
 ├── ansible.cfg
+├── Презентация_проектной_работы_Ansible_OTUS_macOS.pptx
 ├── inventory/
 │   └── production/
 ├── playbooks/
